@@ -5,4 +5,4 @@ obj/%.o: src/%.cu
 	nvcc -lineinfo -arch=sm_75 -c $< -o $@
 
 clean:
-	rm -f *.o main
+	rm -f obj/*.o main
