@@ -6,7 +6,7 @@
 //if you do not know the algorithm, do not change
 #define SHFTL_RAW 32 //shift_left:the length of left overlapping part of this block with the lefthand block  (without puncturing)
 #define SHFTR_RAW 32 //shift_right:the length of right overlapping part of this block with the righthand block  (without puncturing)
-#define D_RAW 256 //the total length of each block
+#define D_RAW (256) //the total length of each block
 //===========================================================================================//
 
 #define CL 7 //constraint length
@@ -23,4 +23,5 @@
 #define DECSIZE  ROUNDUP(D_RAW, PATHSIZE)
 #define SLIDESIZE 32
 #define SHMEMWIDTH (SHFTL + SLIDESIZE + SHFTR)
+#define BLOCK_DIMY 2
 //===========================================================================================//

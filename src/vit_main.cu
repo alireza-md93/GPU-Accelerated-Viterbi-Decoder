@@ -181,19 +181,19 @@ void get_inputs(int argc, char *argv[], int& messageLen, float& snr)
 	int temp;
 	switch(argc){
 		case 1:
-			messageLen = 32000000 - (32000000 % DECSIZE);
+			messageLen = 32000000 - (32000000 % (DECSIZE*BLOCK_DIMY));
 			snr = 15.0;
 			break;
 			
 		case 2:
 			temp = atoi(argv[1]);
-			messageLen = temp - (temp % DECSIZE);
+			messageLen = temp - (temp % (DECSIZE*BLOCK_DIMY));
 			snr = 15.0;
 			break;
 			
 		case 3:
 			temp = atoi(argv[1]);
-			messageLen = temp - (temp % DECSIZE);
+			messageLen = temp - (temp % (DECSIZE*BLOCK_DIMY));
 			snr = atof(argv[4]);
 			break;
 			

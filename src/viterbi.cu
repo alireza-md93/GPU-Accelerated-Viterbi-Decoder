@@ -13,6 +13,7 @@
 #define bz blockIdx.z
 
 #define bdx blockDim.x
+#define bdy blockDim.y
 #define gdx gridDim.x
 #define gdy gridDim.y
 
@@ -100,18 +101,20 @@ __global__ void viterbi_core(bool* data, float* coded, unsigned int* pathPrev_al
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
 	
-	
-	__shared__ float pathMetric[1<<(CL-1)]; //path metrics
-	// __shared__ unsigned int pathPrev[(SHMEMWIDTH-1)/32+1][1<<(CL-1)]; //survived paths
-	__shared__ float branchMetric[SHMEMWIDTH][2];
+	extern __shared__ float sharedMem[];
+	float* sharedMemTip = sharedMem;
+	sharedMemTip += ty * ((1<<(CL-1)) + (SHMEMWIDTH * 2));
+	float* pathMetric = sharedMemTip;
+	sharedMemTip += (1<<(CL-1));
+	float (*branchMetric)[2] = (float(*)[2])sharedMemTip;
 
-	unsigned int (*pathPrev) [1<<(CL-1)] = (unsigned int (*) [1<<(CL-1)])pathPrev_all + bx *((SHMEMWIDTH-1)/32+1);
+	unsigned int (*pathPrev) [1<<(CL-1)] = (unsigned int (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) *((SHMEMWIDTH-1)/32+1);
 
 	char ind_s0_b0;
 	int prevState0, prevState1; //previous states
 	
 	//shift "data" and "coded" pointer to the index that this block should process
-	int start_ind = DECSIZE * bx;
+	int start_ind = DECSIZE * bdy * bx + DECSIZE * ty;
 	data += start_ind;
 	coded += start_ind*2;
 	
@@ -159,16 +162,19 @@ int viterbi_run(float* input_d, bool* output_d, int messageLen, float* time) {
 	int wins = messageLen / DECSIZE;
 	unsigned int* pathPrev_d;
 	int ppSize = ((SHMEMWIDTH-1)/32+1) * (1<<(CL-1)) * sizeof(unsigned int) * wins;
+	int sharedMemSize = (1<<(CL-1)) * sizeof(float);
+	sharedMemSize += SHMEMWIDTH * 2 * sizeof(float);
+	sharedMemSize *= BLOCK_DIMY;
 
 	HANDLE_ERROR(cudaMalloc((void**)&pathPrev_d, ppSize));
 
 	GpuTimer timer;
 	
-	dim3 grid (wins, 1, 1); 
-	dim3 block (TPB, 1, 1);
+	dim3 grid (wins/BLOCK_DIMY, 1, 1); 
+	dim3 block (TPB, BLOCK_DIMY, 1);
 
 	timer.Start();
-    viterbi_core <<<grid, block>>> (output_d, input_d, pathPrev_d);
+    viterbi_core <<<grid, block, sharedMemSize>>> (output_d, input_d, pathPrev_d);
 	timer.Stop();
 	*time = timer.Elapsed();
 	
