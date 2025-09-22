@@ -16,13 +16,6 @@
 #define PI 3.141592653589793
 //==============================================================================================//
 
-#define PATHSIZE 8
-typedef unsigned char path_t;
-
-// #define PATHSIZE 32
-// typedef unsigned int path_t;
-
-
 // ===========================> Functions Prototype <===============================
 void noiseN(bool data[], float noisy[], int num, float std);
 void fill(bool* data, int size);

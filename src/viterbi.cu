@@ -17,13 +17,6 @@
 #define gdx gridDim.x
 #define gdy gridDim.y
 
-
-#define PATHSIZE 8
-typedef unsigned char path_t;
-
-// #define PATHSIZE 32
-// typedef unsigned int path_t;
-
 __device__ __forceinline__ void bmCalc(int ind, int num, float branchMetric[][2], float* coded){
 	for(int i=ind; i<ind+num; i+=bdx){
 		branchMetric[(i+tx)%SHMEMWIDTH][0] = -coded[2*(i+tx)] - coded[2*(i+tx)+1];
@@ -31,7 +24,7 @@ __device__ __forceinline__ void bmCalc(int ind, int num, float branchMetric[][2]
 	}   
 }
 
-__device__ __forceinline__ void forwardACS(int ind, float* pathMetric, unsigned int pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
+__device__ __forceinline__ void forwardACS(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
 	int i = ind % SHMEMWIDTH;
 	float pathMetric1 = pathMetric[prevState0] + branchMetric[i][ind_s0_b0];
 	float pathMetric2 = pathMetric[prevState1] - branchMetric[i][ind_s0_b0];
@@ -46,11 +39,11 @@ __device__ __forceinline__ void forwardACS(int ind, float* pathMetric, unsigned 
 	bool cond1 = condPM12 ^ condPrev;
 	bool cond2 = condPM34 ^ condPrev;
 	
-	pathPrev[i/32][tx] <<= 1;
-	pathPrev[i/32][tx] += (char)(cond1);
+	pathPrev[i/PATHSIZE][tx] <<= 1;
+	pathPrev[i/PATHSIZE][tx] += (char)(cond1);
 	
-	pathPrev[i/32][tx+(1<<(CL-2))] <<= 1;
-	pathPrev[i/32][tx+(1<<(CL-2))] += (char)(cond2);
+	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] <<= 1;
+	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] += (char)(cond2);
 	
 	pathMetric1 = condPM12 ? pathMetric1 : pathMetric2;
 	pathMetric3 = condPM34 ? pathMetric3 : pathMetric4;
@@ -64,7 +57,7 @@ __device__ __forceinline__ void forwardACS(int ind, float* pathMetric, unsigned 
 	__syncthreads();
 }
 
-__device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* data, float* pathMetric, unsigned int pathPrev[][1<<(CL-1)]){
+__device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* data, float* pathMetric, path_t pathPrev[][1<<(CL-1)]){
 	if(tx == 0){
 		//recognize the last state of survived path that is with the maximum path metric
 		float winnerPathMetric = pathMetric[0];
@@ -82,14 +75,14 @@ __device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* da
 		for(int s=0; s<SHFTR; s++){
 			int i = (endStage - s) % SHMEMWIDTH;
 			winnerState = ((winnerState << 1) & ~(1<<(CL-1))) + (int)insBit;
-			insBit = (pathPrev[i/32][winnerState] &(1U<<(31-i%32))) != 0;
+			insBit = (pathPrev[i/PATHSIZE][winnerState] &(1U<<((PATHSIZE-1)-i%PATHSIZE))) != 0;
 		}
 		
 		for(int s=0; s<SLIDESIZE; s++){
 			winnerState = ((winnerState << 1) & ~(1<<(CL-1))) + (int)insBit; //trace back
 			data[dataEndInd-s] = winnerState>>(CL-2); //decode
 			int i = (endStage - SHFTR - s) % SHMEMWIDTH;
-			insBit = (pathPrev[i/32][winnerState] & (1U<<(31-i%32))) != 0;
+			insBit = (pathPrev[i/PATHSIZE][winnerState] & (1U<<((PATHSIZE-1)-i%PATHSIZE))) != 0;
 		}
 	}
 }
@@ -97,7 +90,7 @@ __device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* da
 //-----------------------------------------------------------------------------
 //the main core of viterbi decoder
 //get data and polynoials ans decode 
-__global__ void viterbi_core(bool* data, float* coded, unsigned int* pathPrev_all) {
+__global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
 	
@@ -108,7 +101,7 @@ __global__ void viterbi_core(bool* data, float* coded, unsigned int* pathPrev_al
 	sharedMemTip += (1<<(CL-1));
 	float (*branchMetric)[2] = (float(*)[2])sharedMemTip;
 
-	unsigned int (*pathPrev) [1<<(CL-1)] = (unsigned int (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) *((SHMEMWIDTH-1)/32+1);
+	path_t (*pathPrev) [1<<(CL-1)] = (path_t (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) *((SHMEMWIDTH-1)/PATHSIZE+1);
 
 	char ind_s0_b0;
 	int prevState0, prevState1; //previous states
@@ -160,8 +153,8 @@ __global__ void viterbi_core(bool* data, float* coded, unsigned int* pathPrev_al
 
 int viterbi_run(float* input_d, bool* output_d, int messageLen, float* time) {
 	int wins = messageLen / DECSIZE;
-	unsigned int* pathPrev_d;
-	int ppSize = ((SHMEMWIDTH-1)/32+1) * (1<<(CL-1)) * sizeof(unsigned int) * wins;
+	path_t* pathPrev_d;
+	int ppSize = ((SHMEMWIDTH-1)/PATHSIZE+1) * (1<<(CL-1)) * sizeof(path_t) * wins;
 	int sharedMemSize = (1<<(CL-1)) * sizeof(float);
 	sharedMemSize += SHMEMWIDTH * 2 * sizeof(float);
 	sharedMemSize *= BLOCK_DIMY;

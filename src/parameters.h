@@ -17,6 +17,12 @@
 
 #define ROUNDUP(a, b) ( (a)<=0 ? 0 : (  ( (((a)-1)/(b)) + 1 ) * (b) ) ) //round up a to the nearest multiple of b
 
+#define PATHSIZE 8
+typedef unsigned char path_t;
+
+// #define PATHSIZE 32
+// typedef unsigned int path_t;
+
 //=====================================> GPU parameters <====================================//
 #define SHFTL ROUNDUP(SHFTL_RAW, PATHSIZE)
 #define SHFTR ROUNDUP(SHFTR_RAW, PATHSIZE)
