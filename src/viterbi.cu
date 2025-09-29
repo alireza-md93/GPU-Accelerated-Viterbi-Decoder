@@ -25,32 +25,30 @@ __device__ __forceinline__ void bmCalc(int ind, int num, float branchMetric[][2]
 }
 
 template<ACS acsType>
-__device__ __forceinline__ void forwardACS(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){}
+__device__ __forceinline__ void forwardACS(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char bmInd, int prevState, bool out0){}
 
 template<>
-__device__ __forceinline__ void forwardACS<ACS::RADIX2>(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
+__device__ __forceinline__ void forwardACS<ACS::RADIX2>(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char bmInd, int prevState, bool out0){
 	int i = ind % SHMEMWIDTH;
-	float pathMetric1 = pathMetric[prevState0] + branchMetric[i][ind_s0_b0];
-	float pathMetric2 = pathMetric[prevState1] - branchMetric[i][ind_s0_b0];
-	float pathMetric3 = pathMetric[prevState0] - branchMetric[i][ind_s0_b0];
-	float pathMetric4 = pathMetric[prevState1] + branchMetric[i][ind_s0_b0];
+
+	float bm = out0 ? -branchMetric[i][bmInd] : branchMetric[i][bmInd];
+
+	float pathMetric1 = pathMetric[prevState]   + bm;
+	float pathMetric2 = pathMetric[prevState+1] - bm;
+	float pathMetric3 = pathMetric[prevState]   - bm;
+	float pathMetric4 = pathMetric[prevState+1] + bm;
 	
-	bool condPM12 = pathMetric1 > pathMetric2;
-	bool condPM34 = pathMetric3 > pathMetric4;
-	
-	bool condPrev = prevState0 % 2 == 0;
-	
-	bool cond1 = condPM12 ^ condPrev;
-	bool cond2 = condPM34 ^ condPrev;
+	bool condPM12 = pathMetric1 < pathMetric2;
+	bool condPM34 = pathMetric3 < pathMetric4;
 	
 	pathPrev[i/PATHSIZE][tx] <<= 1;
-	pathPrev[i/PATHSIZE][tx] += (char)(cond1);
+	pathPrev[i/PATHSIZE][tx] += condPM12;
 	
 	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] <<= 1;
-	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] += (char)(cond2);
+	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] += condPM34;
 	
-	pathMetric1 = condPM12 ? pathMetric1 : pathMetric2;
-	pathMetric3 = condPM34 ? pathMetric3 : pathMetric4;
+	pathMetric1 = condPM12 ? pathMetric2 : pathMetric1;
+	pathMetric3 = condPM34 ? pathMetric4 : pathMetric3;
 	
 	__syncthreads();
 	
@@ -62,21 +60,20 @@ __device__ __forceinline__ void forwardACS<ACS::RADIX2>(int ind, float* pathMetr
 }
 
 template<>
-__device__ __forceinline__ void forwardACS<ACS::SIMPLE>(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
+__device__ __forceinline__ void forwardACS<ACS::SIMPLE>(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char bmInd, int prevState, bool out0){
 	int i = ind % SHMEMWIDTH;
-	float pathMetric1 = pathMetric[prevState0] + branchMetric[i][ind_s0_b0];
-	float pathMetric2 = pathMetric[prevState1] - branchMetric[i][ind_s0_b0];
+
+	float bm = out0 ? -branchMetric[i][bmInd] : branchMetric[i][bmInd];
+
+	float pathMetric1 = pathMetric[prevState]   + bm;
+	float pathMetric2 = pathMetric[prevState+1] - bm;
 	
-	bool condPM12 = pathMetric1 > pathMetric2;
-	
-	bool condPrev = prevState0 % 2 == 0;
-	
-	bool cond1 = condPM12 ^ condPrev;
+	bool condPM12 = pathMetric1 < pathMetric2;
 	
 	pathPrev[i/PATHSIZE][tx] <<= 1;
-	pathPrev[i/PATHSIZE][tx] += (char)(cond1);
+	pathPrev[i/PATHSIZE][tx] += condPM12;
 	
-	pathMetric1 = condPM12 ? pathMetric1 : pathMetric2;
+	pathMetric1 = condPM12 ? pathMetric2 : pathMetric1;
 	
 	__syncthreads();
 	
@@ -133,29 +130,18 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 
 	path_t (*pathPrev) [1<<(CL-1)] = (path_t (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) *((SHMEMWIDTH-1)/PATHSIZE+1);
 
-	char ind_s0_b0;
-	int prevState0, prevState1; //previous states
+	int bmInd, prevState;
 	
 	//shift "data" and "coded" pointer to the index that this block should process
 	int start_ind = DECSIZE * bdy * bx + DECSIZE * ty;
 	data += start_ind;
 	coded += start_ind*2;
 	
-	/***************************** calculate output matrix of FSM *****************************/	 
-	
-	bool out0[2];
-
-	//the first output
-	prevState0 = (tx<<1);
-	
-	out0[0] = __popc(prevState0 & POLYN1) % 2;
-	out0[1] = __popc(prevState0 & POLYN2) % 2;
-
-	prevState0 = ((tx<<1) & ((1<<(CL-1)) - 1)) + (int)(out0[0]); 
-	prevState1 = ((tx<<1) & ((1<<(CL-1)) - 1)) + (int)(!out0[0]);
-
-	
-	ind_s0_b0 = out0[0] ^ out0[1];
+	/****************************** calculate trellis parameters ******************************/	 
+	bool out0 = __popc((tx<<1) & POLYN1) % 2;
+	bool out1 = __popc((tx<<1) & POLYN2) % 2;
+	prevState = ((tx<<1) & ((1<<(CL-1)) - 1)); 
+	bmInd = out0 ^ out1;
 	/******************************************************************************************/
 	
 	//initialize path metrics
@@ -166,14 +152,14 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 	bmCalc(0, SHFTL+SHFTR, branchMetric, coded);
 	__syncthreads();
 	for(int i=0; i<SHFTL+SHFTR; i++)
-		forwardACS<ACStype>(i, pathMetric, pathPrev, branchMetric, ind_s0_b0, prevState0, prevState1);
+		forwardACS<ACStype>(i, pathMetric, pathPrev, branchMetric, bmInd, prevState, out0);
 
 	for(int slide=0; slide<DECSIZE; slide+=SLIDESIZE){
 		int ind = slide + SHFTL + SHFTR;
 		bmCalc(ind, SLIDESIZE, branchMetric, coded);   
 		__syncthreads();
 		for(int i=ind; i<ind+SLIDESIZE; i++){	
-			forwardACS<ACStype>(i, pathMetric, pathPrev, branchMetric, ind_s0_b0, prevState0, prevState1);
+			forwardACS<ACStype>(i, pathMetric, pathPrev, branchMetric, bmInd, prevState, out0);
 		}
 		traceback(ind+SLIDESIZE-1, slide+SLIDESIZE-1, data, pathMetric, pathPrev);
 	}
