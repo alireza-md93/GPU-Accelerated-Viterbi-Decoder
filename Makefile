@@ -5,4 +5,4 @@ obj/%.o: src/%.cu src/parameters.h
 	nvcc -lineinfo -arch=sm_75 -c $< -o $@
 
 clean:
-	rm -f obj/*.o main
+	rm -f obj/*.o *.ncu* main

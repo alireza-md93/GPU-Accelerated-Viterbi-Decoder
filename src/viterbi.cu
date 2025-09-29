@@ -18,13 +18,17 @@
 #define gdy gridDim.y
 
 __device__ __forceinline__ void bmCalc(int ind, int num, float branchMetric[][2], float* coded){
-	for(int i=ind; i<ind+num; i+=bdx){
-		branchMetric[(i+tx)%SHMEMWIDTH][0] = -coded[2*(i+tx)] - coded[2*(i+tx)+1];
-		branchMetric[(i+tx)%SHMEMWIDTH][1] = -coded[2*(i+tx)] + coded[2*(i+tx)+1];
+	for(int i=ind+tx; i<ind+num; i+=bdx){
+		branchMetric[i%SHMEMWIDTH][0] = -coded[2*i] - coded[2*i+1];
+		branchMetric[i%SHMEMWIDTH][1] = -coded[2*i] + coded[2*i+1];
 	}   
 }
 
-__device__ __forceinline__ void forwardACS(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
+template<ACS acsType>
+__device__ __forceinline__ void forwardACS(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){}
+
+template<>
+__device__ __forceinline__ void forwardACS<ACS::RADIX2>(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
 	int i = ind % SHMEMWIDTH;
 	float pathMetric1 = pathMetric[prevState0] + branchMetric[i][ind_s0_b0];
 	float pathMetric2 = pathMetric[prevState1] - branchMetric[i][ind_s0_b0];
@@ -53,6 +57,31 @@ __device__ __forceinline__ void forwardACS(int ind, float* pathMetric, path_t pa
 	//update path metrics
 	pathMetric[tx] = pathMetric1;
 	pathMetric[tx+(1<<(CL-2))] = pathMetric3;
+	
+	__syncthreads();
+}
+
+template<>
+__device__ __forceinline__ void forwardACS<ACS::SIMPLE>(int ind, float* pathMetric, path_t pathPrev[][1<<(CL-1)], float branchMetric[][2], char ind_s0_b0, int prevState0, int prevState1){
+	int i = ind % SHMEMWIDTH;
+	float pathMetric1 = pathMetric[prevState0] + branchMetric[i][ind_s0_b0];
+	float pathMetric2 = pathMetric[prevState1] - branchMetric[i][ind_s0_b0];
+	
+	bool condPM12 = pathMetric1 > pathMetric2;
+	
+	bool condPrev = prevState0 % 2 == 0;
+	
+	bool cond1 = condPM12 ^ condPrev;
+	
+	pathPrev[i/PATHSIZE][tx] <<= 1;
+	pathPrev[i/PATHSIZE][tx] += (char)(cond1);
+	
+	pathMetric1 = condPM12 ? pathMetric1 : pathMetric2;
+	
+	__syncthreads();
+	
+	//update path metrics
+	pathMetric[tx] = pathMetric1;
 	
 	__syncthreads();
 }
@@ -90,6 +119,7 @@ __device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* da
 //-----------------------------------------------------------------------------
 //the main core of viterbi decoder
 //get data and polynoials ans decode 
+template<ACS ACStype>
 __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
@@ -121,11 +151,11 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 	out0[0] = __popc(prevState0 & POLYN1) % 2;
 	out0[1] = __popc(prevState0 & POLYN2) % 2;
 
-	prevState0 = (tx<<1) + (int)(out0[0]); 
-	prevState1 = (tx<<1) + (int)(!out0[0]);
+	prevState0 = ((tx<<1) & ((1<<(CL-1)) - 1)) + (int)(out0[0]); 
+	prevState1 = ((tx<<1) & ((1<<(CL-1)) - 1)) + (int)(!out0[0]);
+
 	
 	ind_s0_b0 = out0[0] ^ out0[1];
-
 	/******************************************************************************************/
 	
 	//initialize path metrics
@@ -136,14 +166,14 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 	bmCalc(0, SHFTL+SHFTR, branchMetric, coded);
 	__syncthreads();
 	for(int i=0; i<SHFTL+SHFTR; i++)
-		forwardACS(i, pathMetric, pathPrev, branchMetric, ind_s0_b0, prevState0, prevState1);
+		forwardACS<ACStype>(i, pathMetric, pathPrev, branchMetric, ind_s0_b0, prevState0, prevState1);
 
 	for(int slide=0; slide<DECSIZE; slide+=SLIDESIZE){
 		int ind = slide + SHFTL + SHFTR;
 		bmCalc(ind, SLIDESIZE, branchMetric, coded);   
 		__syncthreads();
 		for(int i=ind; i<ind+SLIDESIZE; i++){	
-			forwardACS(i, pathMetric, pathPrev, branchMetric, ind_s0_b0, prevState0, prevState1);
+			forwardACS<ACStype>(i, pathMetric, pathPrev, branchMetric, ind_s0_b0, prevState0, prevState1);
 		}
 		traceback(ind+SLIDESIZE-1, slide+SLIDESIZE-1, data, pathMetric, pathPrev);
 	}
@@ -151,23 +181,35 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 
 //-----------------------------------------------------------------------------
 
-int viterbi_run(float* input_d, bool* output_d, int messageLen, float* time) {
+int viterbi_run(float* input_d, bool* output_d, int messageLen, float* time, ACS acsType) {
 	int wins = messageLen / DECSIZE;
 	path_t* pathPrev_d;
 	int ppSize = ((SHMEMWIDTH-1)/PATHSIZE+1) * (1<<(CL-1)) * sizeof(path_t) * wins;
 	int sharedMemSize = (1<<(CL-1)) * sizeof(float);
 	sharedMemSize += SHMEMWIDTH * 2 * sizeof(float);
 	sharedMemSize *= BLOCK_DIMY;
+	int blockSize = (acsType == ACS::SIMPLE) ? (1<<(CL-1)) : (1<<(CL-2));
 
 	HANDLE_ERROR(cudaMalloc((void**)&pathPrev_d, ppSize));
 
 	GpuTimer timer;
 	
 	dim3 grid (wins/BLOCK_DIMY, 1, 1); 
-	dim3 block (TPB, BLOCK_DIMY, 1);
+	dim3 block (blockSize, BLOCK_DIMY, 1);
 
 	timer.Start();
-    viterbi_core <<<grid, block, sharedMemSize>>> (output_d, input_d, pathPrev_d);
+	switch (acsType)
+	{
+	case ACS::SIMPLE:
+		viterbi_core<ACS::SIMPLE> <<<grid, block, sharedMemSize>>> (output_d, input_d, pathPrev_d);
+		break;
+	case ACS::RADIX2:
+		viterbi_core<ACS::RADIX2> <<<grid, block, sharedMemSize>>> (output_d, input_d, pathPrev_d);
+		break;
+	
+	default:
+		break;
+	}
 	timer.Stop();
 	*time = timer.Elapsed();
 	

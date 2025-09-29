@@ -13,8 +13,6 @@
 #define POLYN1 0171 //polynomial 1
 #define POLYN2 0133 //polynomial 2
 
-#define TPB (1<<(CL-2))
-
 #define ROUNDUP(a, b) ( (a)<=0 ? 0 : (  ( (((a)-1)/(b)) + 1 ) * (b) ) ) //round up a to the nearest multiple of b
 
 #define PATHSIZE 8
@@ -22,6 +20,8 @@ typedef unsigned char path_t;
 
 // #define PATHSIZE 32
 // typedef unsigned int path_t;
+
+enum ACS {SIMPLE, RADIX2};
 
 //=====================================> GPU parameters <====================================//
 #define SHFTL ROUNDUP(SHFTL_RAW, PATHSIZE)

@@ -158,7 +158,8 @@ void gpuKernels(bool* dec, float* enc, int messageLen, float* gpuKernelTime) {
 	
 	//run
 	HANDLE_ERROR(cudaMemcpy(enc_d, enc, inputSize, cudaMemcpyHostToDevice));
-	viterbi_run (enc_d, dec_d, messageLen, gpuKernelTime);
+	// viterbi_run (enc_d, dec_d, messageLen, gpuKernelTime, ACS::SIMPLE);
+	viterbi_run (enc_d, dec_d, messageLen, gpuKernelTime, ACS::RADIX2);
 	HANDLE_ERROR(cudaMemcpy(dec, dec_d, outputSize, cudaMemcpyDeviceToHost));
 	
 	
