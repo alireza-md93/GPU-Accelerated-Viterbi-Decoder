@@ -24,8 +24,8 @@ typedef unsigned char path_t;
 enum ACS {SIMPLE, RADIX2};
 
 //=====================================> GPU parameters <====================================//
-#define SHFTL ROUNDUP(SHFTL_RAW, PATHSIZE)
-#define SHFTR ROUNDUP(SHFTR_RAW, PATHSIZE)
+#define SHFTL (ROUNDUP(SHFTL_RAW, PATHSIZE) - (CL-1))
+#define SHFTR (ROUNDUP(SHFTR_RAW, PATHSIZE) + (CL-1))
 #define DECSIZE  ROUNDUP(D_RAW, PATHSIZE)
 #define SLIDESIZE 32
 #define SHMEMWIDTH (SHFTL + SLIDESIZE + SHFTR)

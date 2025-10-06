@@ -20,7 +20,7 @@
 void noiseN(bool data[], float noisy[], int num, float std);
 void fill(bool* data, int size);
 void get_inputs(int argc, char *argv[], int& messageLen, float& snr);
-void gpuKernels(bool* data, float* coded, int messageLen, float* gpuKernelTime);
+void gpuKernels(path_t* data, float* coded, int messageLen, float* gpuKernelTime);
 void convEnc(bool data[], bool coded[], int n);
 // =================================================================================
 
@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
 	cudaGetDeviceCount(&deviceNumbers);
 	std::cout << "Number of CUDA devices: " << deviceNumbers << std::endl;
 	cudaSetDevice(deviceNumbers-1);
+	cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 100ULL * 1024 * 1024);
 	
 	int i;
 	 
@@ -45,13 +46,13 @@ int main(int argc, char *argv[]) {
 	
 	//memory in CPU side
 	bool* data;
-	bool* dataDec_SH; //SH: soft input hard output
+	path_t* dataDec_SH; //SH: soft input hard output
 	bool* coded;
 	float* codedNoisy;
 	
 	//allocate memory for CPU
-	data = (bool*) malloc(messageLen * sizeof(bool));
-	dataDec_SH = (bool*) malloc(messageLen * sizeof(bool));
+	data = (bool*) malloc(messageLen_ext * sizeof(bool));
+	dataDec_SH = (path_t*) malloc(messageLen/PATHSIZE * sizeof(path_t));
 	coded = (bool*) malloc(codedLen * sizeof(bool));
 	codedNoisy = (float*) malloc(codedLen * sizeof(float));
 
@@ -86,9 +87,10 @@ int main(int argc, char *argv[]) {
 	//check
 	int minInd=-1; //minimum index of errors
 	int maxInd = 0; //maximum index of errors
-	for(i=SHFTL; i<messageLen_ext-SHFTR; i++){
-		if(dataDec_SH[i-SHFTL] != data[i]){
-			//printf(":%d\n", i);
+	for(i=0; i<messageLen; i++){
+		bool decodedBit = (dataDec_SH[i/PATHSIZE] & (1U<<((PATHSIZE-1)-(i%PATHSIZE)))) == 0 ? false : true;
+		if(decodedBit != data[i+SHFTL]){
+			// printf(":%d\n", i);
 			BENs++;
 			maxInd = i;
 			if(minInd == -1)
@@ -143,13 +145,13 @@ void noiseN(bool data[], float noisy[], int num, float std)
 //n is the numer of decoded bits.
 //wrap is flag that defines whether to partition data or not
 //gpuKernelTime will be filled the time of kernel without data transfer
-void gpuKernels(bool* dec, float* enc, int messageLen, float* gpuKernelTime) {
-    bool* dec_d;
+void gpuKernels(path_t* dec, float* enc, int messageLen, float* gpuKernelTime) {
+    path_t* dec_d;
 	//bool* coded_trel_d;
     float* enc_d;
 	
 	int inputSize = (messageLen + SHFTL + SHFTR)*2 * sizeof(float);
-	int outputSize = messageLen * sizeof(bool);
+	int outputSize = messageLen/PATHSIZE * sizeof(path_t);
 	
     //HANDLE_ERROR(cudaMemcpy(coded_d, coded, inputSize, cudaMemcpyHostToDevice));
 	//initialization
@@ -199,7 +201,8 @@ void get_inputs(int argc, char *argv[], int& messageLen, float& snr)
 //-----------------------------------------------------------------------------
 //fills boolean data with true and false with the same probability
 void fill(bool* data, int size) {
-    srand( time(NULL) );
+    // srand( time(NULL) );
+    srand( 0 );
 	int i; for(i=0; i<size; i++){
 		data[i] = ( rand() > (RAND_MAX/2) );
 		//data[i] = true;

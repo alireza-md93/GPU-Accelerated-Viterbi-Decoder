@@ -19,6 +19,7 @@
 
 __device__ __forceinline__ void bmCalc(int ind, int num, float branchMetric[][2], float* coded){
 	for(int i=ind+tx; i<ind+num; i+=bdx){
+		// if(bx==0 && ty==0)printf("=== out:%d:%d%d\n", i, coded[2*i]>0.0, coded[2*i+1]>0.0);
 		branchMetric[i%SHMEMWIDTH][0] = -coded[2*i] - coded[2*i+1];
 		branchMetric[i%SHMEMWIDTH][1] = -coded[2*i] + coded[2*i+1];
 	}   
@@ -41,11 +42,13 @@ __device__ __forceinline__ void forwardACS<ACS::RADIX2>(int ind, float* pathMetr
 	bool condPM12 = pathMetric1 < pathMetric2;
 	bool condPM34 = pathMetric3 < pathMetric4;
 	
-	pathPrev[i/PATHSIZE][tx] <<= 1;
-	pathPrev[i/PATHSIZE][tx] += condPM12;
+	path_t pp12 = pathPrev[i/PATHSIZE][condPM12 ? prevState+1 : prevState];
+	pp12 <<= 1;
+	pp12 += condPM12;
 	
-	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] <<= 1;
-	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] += condPM34;
+	path_t pp34 = pathPrev[i/PATHSIZE][condPM34 ? prevState+1 : prevState];
+	pp34 <<= 1;
+	pp34 += condPM34;
 	
 	pathMetric1 = condPM12 ? pathMetric2 : pathMetric1;
 	pathMetric3 = condPM34 ? pathMetric4 : pathMetric3;
@@ -55,6 +58,9 @@ __device__ __forceinline__ void forwardACS<ACS::RADIX2>(int ind, float* pathMetr
 	//update path metrics
 	pathMetric[tx] = pathMetric1;
 	pathMetric[tx+(1<<(CL-2))] = pathMetric3;
+
+	pathPrev[i/PATHSIZE][tx] = pp12;
+	pathPrev[i/PATHSIZE][tx+(1<<(CL-2))] = pp34;
 	
 	__syncthreads();
 }
@@ -69,9 +75,10 @@ __device__ __forceinline__ void forwardACS<ACS::SIMPLE>(int ind, float* pathMetr
 	float pathMetric2 = pathMetric[prevState+1] - bm;
 	
 	bool condPM12 = pathMetric1 < pathMetric2;
-	
-	pathPrev[i/PATHSIZE][tx] <<= 1;
-	pathPrev[i/PATHSIZE][tx] += condPM12;
+
+	path_t pp12 = pathPrev[i/PATHSIZE][condPM12 ? prevState+1 : prevState];
+	pp12 <<= 1;
+	pp12 += condPM12;
 	
 	pathMetric1 = condPM12 ? pathMetric2 : pathMetric1;
 	
@@ -79,36 +86,32 @@ __device__ __forceinline__ void forwardACS<ACS::SIMPLE>(int ind, float* pathMetr
 	
 	//update path metrics
 	pathMetric[tx] = pathMetric1;
+	pathPrev[i/PATHSIZE][tx] = pp12;
 	
 	__syncthreads();
 }
 
-__device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* data, float* pathMetric, path_t pathPrev[][1<<(CL-1)]){
+__device__ __forceinline__ void traceback(int endStage, int dataEndInd, path_t* data, float* pathMetric, path_t pathPrev[][1<<(CL-1)]){
 	if(tx == 0){
 		//recognize the last state of survived path that is with the maximum path metric
-		float winnerPathMetric = pathMetric[0];
+		// float winnerPathMetric = pathMetric[0];
 		int winnerState = 0;
-		for(int i=0; i<(1<<(CL-1)); i++)
-			if(pathMetric[i] > winnerPathMetric){
-				winnerPathMetric = pathMetric[i];
-				winnerState = i;
-			}
-		bool insBit=winnerState&1;
-		winnerState >>= 1;
+		// for(int i=0; i<(1<<(CL-1)); i++)
+		// 	if(pathMetric[i] > winnerPathMetric){
+		// 		winnerPathMetric = pathMetric[i];
+		// 		winnerState = i;
+		// 	}
 	
-	
-		//part1. only trace back process to reach the second part
-		for(int s=0; s<SHFTR; s++){
-			int i = (endStage - s) % SHMEMWIDTH;
-			winnerState = ((winnerState << 1) & ~(1<<(CL-1))) + (int)insBit;
-			insBit = (pathPrev[i/PATHSIZE][winnerState] &(1U<<((PATHSIZE-1)-i%PATHSIZE))) != 0;
+		for(int s=0; s<SHFTR-PATHSIZE; s+=PATHSIZE){
+			path_t pp = pathPrev[((endStage - s) % SHMEMWIDTH)/PATHSIZE][winnerState];
+			winnerState = __brev(pp<<(32-PATHSIZE)) & ((1U<<(CL-1))-1);
 		}
 		
-		for(int s=0; s<SLIDESIZE; s++){
-			winnerState = ((winnerState << 1) & ~(1<<(CL-1))) + (int)insBit; //trace back
-			data[dataEndInd-s] = winnerState>>(CL-2); //decode
+		for(int s=0; s<SLIDESIZE; s+=PATHSIZE){
 			int i = (endStage - SHFTR - s) % SHMEMWIDTH;
-			insBit = (pathPrev[i/PATHSIZE][winnerState] & (1U<<((PATHSIZE-1)-i%PATHSIZE))) != 0;
+			path_t pp = pathPrev[i/PATHSIZE][winnerState];
+			data[(dataEndInd-s)/PATHSIZE] = pp;
+			winnerState = __brev(pp<<(32-PATHSIZE)) & ((1U<<(CL-1))-1);
 		}
 	}
 }
@@ -117,7 +120,7 @@ __device__ __forceinline__ void traceback(int endStage, int dataEndInd, bool* da
 //the main core of viterbi decoder
 //get data and polynoials ans decode 
 template<ACS ACStype>
-__global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
+__global__ void viterbi_core(path_t* data, float* coded, path_t* pathPrev_all) {
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
 	
@@ -134,7 +137,7 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 	
 	//shift "data" and "coded" pointer to the index that this block should process
 	int start_ind = DECSIZE * bdy * bx + DECSIZE * ty;
-	data += start_ind;
+	data += start_ind/PATHSIZE;
 	coded += start_ind*2;
 	
 	/****************************** calculate trellis parameters ******************************/	 
@@ -167,7 +170,7 @@ __global__ void viterbi_core(bool* data, float* coded, path_t* pathPrev_all) {
 
 //-----------------------------------------------------------------------------
 
-int viterbi_run(float* input_d, bool* output_d, int messageLen, float* time, ACS acsType) {
+int viterbi_run(float* input_d, path_t* output_d, int messageLen, float* time, ACS acsType) {
 	int wins = messageLen / DECSIZE;
 	path_t* pathPrev_d;
 	int ppSize = ((SHMEMWIDTH-1)/PATHSIZE+1) * (1<<(CL-1)) * sizeof(path_t) * wins;
