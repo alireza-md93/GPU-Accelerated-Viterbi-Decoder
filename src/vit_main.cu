@@ -20,7 +20,7 @@
 void noiseN(bool data[], float noisy[], int num, float std);
 void fill(bool* data, int size);
 void get_inputs(int argc, char *argv[], int& messageLen, float& snr);
-void gpuKernels(path_t* data, float* coded, int messageLen, float* gpuKernelTime);
+template<Metric metricType> void gpuKernels(pack_t<metricType>* data, float* coded, int messageLen, float* gpuKernelTime);
 void convEnc(bool data[], bool coded[], int n);
 // =================================================================================
 
@@ -30,8 +30,10 @@ int main(int argc, char *argv[]) {
     int messageLen;
 	float snr;
     get_inputs(argc, argv, messageLen, snr);
+	constexpr Metric metricType = Metric::B16;
 	int messageLen_ext = messageLen + SHFTL + SHFTR;
 	int codedLen = 2*messageLen_ext;
+	int packingWidth = metricType;
 	
 	int deviceNumbers;
 	cudaGetDeviceCount(&deviceNumbers);
@@ -46,13 +48,13 @@ int main(int argc, char *argv[]) {
 	
 	//memory in CPU side
 	bool* data;
-	path_t* dataDec_SH; //SH: soft input hard output
+	pack_t<metricType>* dataDec_SH; //SH: soft input hard output
 	bool* coded;
 	float* codedNoisy;
 	
 	//allocate memory for CPU
 	data = (bool*) malloc(messageLen_ext * sizeof(bool));
-	dataDec_SH = (path_t*) malloc(messageLen/PATHSIZE * sizeof(path_t));
+	dataDec_SH = (pack_t<metricType>*) malloc(messageLen/8);
 	coded = (bool*) malloc(codedLen * sizeof(bool));
 	codedNoisy = (float*) malloc(codedLen * sizeof(float));
 
@@ -79,7 +81,7 @@ int main(int argc, char *argv[]) {
 	float gpuKernelTime;
 	clock_t t2 = clock();
 	
-	gpuKernels(dataDec_SH, codedNoisy, messageLen, &gpuKernelTime);
+	gpuKernels<metricType>(dataDec_SH, codedNoisy, messageLen, &gpuKernelTime);
 	
 	clock_t t3 = clock();
 	float t_elp = (float)(t3-t2)/(CLOCKS_PER_SEC/1000); //the time of kernel and data transfer
@@ -88,7 +90,7 @@ int main(int argc, char *argv[]) {
 	int minInd=-1; //minimum index of errors
 	int maxInd = 0; //maximum index of errors
 	for(i=0; i<messageLen; i++){
-		bool decodedBit = (dataDec_SH[i/PATHSIZE] & (1U<<((PATHSIZE-1)-(i%PATHSIZE)))) == 0 ? false : true;
+		bool decodedBit = (dataDec_SH[i/packingWidth] & (1U<<((packingWidth-1)-(i%packingWidth)))) == 0 ? false : true;
 		if(decodedBit != data[i+SHFTL]){
 			// printf(":%d\n", i);
 			BENs++;
@@ -145,13 +147,14 @@ void noiseN(bool data[], float noisy[], int num, float std)
 //n is the numer of decoded bits.
 //wrap is flag that defines whether to partition data or not
 //gpuKernelTime will be filled the time of kernel without data transfer
-void gpuKernels(path_t* dec, float* enc, int messageLen, float* gpuKernelTime) {
-    path_t* dec_d;
+template<Metric metricType>
+void gpuKernels(pack_t<metricType>* dec, float* enc, int messageLen, float* gpuKernelTime) {
+    pack_t<metricType>* dec_d;
 	//bool* coded_trel_d;
     float* enc_d;
 	
 	int inputSize = (messageLen + SHFTL + SHFTR)*2 * sizeof(float);
-	int outputSize = messageLen/PATHSIZE * sizeof(path_t);
+	int outputSize = messageLen/8;
 	
     //HANDLE_ERROR(cudaMemcpy(coded_d, coded, inputSize, cudaMemcpyHostToDevice));
 	//initialization
@@ -160,8 +163,7 @@ void gpuKernels(path_t* dec, float* enc, int messageLen, float* gpuKernelTime) {
 	
 	//run
 	HANDLE_ERROR(cudaMemcpy(enc_d, enc, inputSize, cudaMemcpyHostToDevice));
-	// viterbi_run (enc_d, dec_d, messageLen, gpuKernelTime, ACS::SIMPLE);
-	viterbi_run (enc_d, dec_d, messageLen, gpuKernelTime, ACS::RADIX2);
+	viterbi_run<metricType>(enc_d, dec_d, messageLen, gpuKernelTime);
 	HANDLE_ERROR(cudaMemcpy(dec, dec_d, outputSize, cudaMemcpyDeviceToHost));
 	
 	
