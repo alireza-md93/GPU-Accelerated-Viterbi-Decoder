@@ -45,6 +45,7 @@ constexpr int extraL = ViterbiCUDA<Metric::B16>::extraL;
 constexpr int extraR = ViterbiCUDA<Metric::B16>::extraR;
 constexpr int slideSize = ViterbiCUDA<Metric::B16>::slideSize;
 constexpr int shmemWidth = ViterbiCUDA<Metric::B16>::shMemWidth;
+template<Metric metricType> constexpr int bpp = ViterbiCUDA<metricType>::bitsPerPack;
 
 template<Metric metricType> using metric_t = typename ViterbiCUDA<metricType>::metric_t;
 template<Metric metricType> using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
@@ -92,7 +93,7 @@ template<Metric metricType> size_t ViterbiCUDA<metricType>::getInputSize(size_t 
 {return (inputNum * sizeof(float));}
 
 template<Metric metricType> size_t ViterbiCUDA<metricType>::getMessageLen(size_t inputNum)
-{return ((inputNum / 2 - (extraL + extraR)) / metricType * metricType);}
+{return ((inputNum / 2 - (extraL + extraR)) / bitsPerPack * bitsPerPack);}
 
 template<Metric metricType> size_t ViterbiCUDA<metricType>::getOutputSize(size_t inputNum)
 {return (getMessageLen(inputNum)/8);}
@@ -277,16 +278,16 @@ __device__ void traceback(int endStage, int dataEndInd, int tbLength, decPack_t<
 	if(tx == 0){
 		int winnerState = 0;
 	
-		for(int s=0; s<extraR-metricType; s+=metricType){
-			decPack_t<metricType> pp = pathPrev[((endStage - s) % shmemWidth)/metricType][winnerState];
-			winnerState = __brev(pp<<(32-metricType)) & ((1U<<(CL-1))-1);
+		for(int s=0; s<extraR-bpp<metricType>; s+=bpp<metricType>){
+			decPack_t<metricType> pp = pathPrev[((endStage - s) % shmemWidth)/bpp<metricType>][winnerState];
+			winnerState = __brev(pp<<(32-bpp<metricType>)) & ((1U<<(CL-1))-1);
 		}
 		
-		for(int s=0; s<tbLength; s+=metricType){
+		for(int s=0; s<tbLength; s+=bpp<metricType>){
 			int i = (endStage - extraR - s) % shmemWidth;
-			decPack_t<metricType> pp = pathPrev[i/metricType][winnerState];
-			data[(dataEndInd-s)/metricType] = pp;
-			winnerState = __brev(pp<<(32-metricType)) & ((1U<<(CL-1))-1);
+			decPack_t<metricType> pp = pathPrev[i/bpp<metricType>][winnerState];
+			data[(dataEndInd-s)/bpp<metricType>] = pp;
+			winnerState = __brev(pp<<(32-bpp<metricType>)) & ((1U<<(CL-1))-1);
 		}
 	}
 }
@@ -304,17 +305,17 @@ __global__ void viterbi_core(decPack_t<metricType>* data, float* coded, size_t m
 	sharedMemTip += ty * (shmemWidth * 4);
 	metric_t<metricType> (*branchMetric)[4] = (metric_t<metricType>(*)[4])sharedMemTip;
 
-	decPack_t<metricType> (*pathPrev) [1<<(CL-1)] = (decPack_t<metricType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((shmemWidth-1)/metricType+1);
+	decPack_t<metricType> (*pathPrev) [1<<(CL-1)] = (decPack_t<metricType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((shmemWidth-1)/bpp<metricType>+1);
 	
-	size_t packNum = messageLen / metricType;
+	size_t packNum = messageLen / bpp<metricType>;
 	size_t decLen = packNum / (gdx * bdy);
 	size_t remPacks = packNum % (gdx * bdy);
 	size_t startInd = decLen * (bx*bdy + ty) + min(remPacks, size_t(bx*bdy + ty));
 	if( (bx*bdy + ty) < remPacks ) decLen++;
-	decLen *= metricType;
-	startInd *= metricType;
+	decLen *= bpp<metricType>;
+	startInd *= bpp<metricType>;
 	
-	data += startInd/metricType;
+	data += startInd/bpp<metricType>;
 	coded += startInd*2;
 	
 	/****************************** calculate trellis parameters ******************************/	 

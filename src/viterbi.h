@@ -18,10 +18,11 @@ class ViterbiCUDA{
 	static constexpr int polyn2 = 0133; //polynomial 2
 
 	static constexpr int roundup(int a, int b) { if(a <= 0) return 0; else return (((a-1)/b + 1) * b); };
+	static constexpr int bitsPerPack = (metricType == Metric::B32) ? 32 : 16;
 	static constexpr int extraL_raw = 32;
 	static constexpr int extraR_raw = 32;
-	static constexpr int extraL = roundup(extraL_raw, metricType) - (constLen - 1);
-	static constexpr int extraR = roundup(extraR_raw, metricType) + (constLen - 1);
+	static constexpr int extraL = roundup(extraL_raw, bitsPerPack) - (constLen - 1);
+	static constexpr int extraR = roundup(extraR_raw, bitsPerPack) + (constLen - 1);
 	static constexpr int slideSize = 128;
 	static constexpr int shMemWidth = extraL + slideSize + extraR;
     static constexpr int blockDimY = 2;

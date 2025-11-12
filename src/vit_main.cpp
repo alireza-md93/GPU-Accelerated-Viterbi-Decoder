@@ -18,6 +18,7 @@ private:
 
 public:
     using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
+    static constexpr int bitsPerPack = ViterbiCUDA<metricType>::bitsPerPack;
     // In real project this would call your GPU viterbi_run
     ViterbiDecoder(): viterbi(new ViterbiCUDA<metricType>()) {}
 	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<metricType>(messageLen)) {}
@@ -44,7 +45,10 @@ int main(int argc, char *argv[]) {
 	constexpr Metric metricType = Metric::B32;
 	constexpr Input inputType = Input::SOFT8;
 	int messageLen_ext = messageLen + ViterbiCUDA<metricType>::extraL + ViterbiCUDA<metricType>::extraR;
-	int packingWidth = metricType;
+	int bitsPerPack = ViterbiDecoder<metricType>::bitsPerPack;
+
+    std::cout << "Message Length: " << messageLen << std::endl;
+    std::cout << "SNR: " << snr << " dB" <<  std::endl;
 	
 	
 	// --- Dataflow Pipeline Setup ---
@@ -64,9 +68,9 @@ int main(int argc, char *argv[]) {
 	BENs = 0;
 	minInd=-1; //minimum index of errors
 	maxInd = 0; //maximum index of errors
-    size_t decodedBitsLen = std::get<BitsPack<metricType>>(result.final_output).size()*packingWidth;
+    size_t decodedBitsLen = std::get<BitsPack<metricType>>(result.final_output).size()*bitsPerPack;
 	for(int i=0; i<decodedBitsLen; i++){
-		bool decodedBit = (std::get<BitsPack<metricType>>(result.final_output)[i/packingWidth] & (1U<<((packingWidth-1)-(i%packingWidth)))) == 0 ? false : true;
+		bool decodedBit = (std::get<BitsPack<metricType>>(result.final_output)[i/bitsPerPack] & (1U<<((bitsPerPack-1)-(i%bitsPerPack)))) == 0 ? false : true;
 		bool genBit = (std::get<Bits>(result.probed_outputs[0])[i+ViterbiCUDA<metricType>::extraL] == Bit::ON) ? true : false;
 		if(decodedBit != genBit){
 			// printf(":%d\n", i);
