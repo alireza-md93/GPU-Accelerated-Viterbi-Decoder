@@ -1,32 +1,17 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 enum Metric {B16=16, B32=32};
 enum Input {HARD, SOFT4, SOFT8};
 
 template<Metric metricType>
-struct packType_helper;
-
-template<> struct packType_helper<Metric::B16> { using type = uint16_t; };
-template<> struct packType_helper<Metric::B32> { using type = uint32_t; };
-
-template<Metric metricType>
-using pack_t = typename packType_helper<metricType>::type;
-
-template<Metric metricType>
-struct metricType_helper;
-
-template<> struct metricType_helper<Metric::B16> { using type = int16_t; };
-template<> struct metricType_helper<Metric::B32> { using type = int32_t; };
-
-template<Metric metricType>
-using metric = typename metricType_helper<metricType>::type;
-
-template<Metric metricType>
 class ViterbiCUDA{
-	
 	public:
+
+	using metric_t = std::conditional_t<metricType == Metric::B16, int16_t, int32_t>;
+	using decPack_t = std::conditional_t<metricType == Metric::B16, uint16_t, uint32_t>; // packed decoded bits (16 bits per uint16_t, 32 bits per uint32_t)
 	
 	static constexpr int constLen = 7; //constraint length
 	static constexpr int polyn1 = 0171; //polynomial 1
@@ -45,15 +30,15 @@ class ViterbiCUDA{
 	ViterbiCUDA(size_t inputNum);
 	~ViterbiCUDA();
 	
-	void run(float* input_h, pack_t<metricType>* output_h, size_t messageLen, float* kernelTime = nullptr);
+	void run(float* input_h, decPack_t* output_h, size_t messageLen, float* kernelTime = nullptr);
 
 	size_t getInputSize(size_t inputNum);
 	size_t getMessageLen(size_t inputNum);
 	size_t getOutputSize(size_t inputNum);
 
 private:
-	pack_t<metricType>* pathPrev_d;
-	pack_t<metricType>* dec_d;
+	decPack_t* pathPrev_d;
+	decPack_t* dec_d;
 	float* enc_d;
 	bool preAllocated;
 	int blocksNum_total;

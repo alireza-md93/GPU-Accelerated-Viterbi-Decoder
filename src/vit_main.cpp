@@ -17,6 +17,7 @@ private:
 	std::unique_ptr<ViterbiCUDA<metricType>> viterbi;
 
 public:
+    using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
     // In real project this would call your GPU viterbi_run
     ViterbiDecoder(): viterbi(new ViterbiCUDA<metricType>()) {}
 	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<metricType>(messageLen)) {}
@@ -24,7 +25,7 @@ public:
     Data process(const OptData& in) override {
         if(!in) throw std::runtime_error("ViterbiDecoder expects input reals");
         Reals soft = std::get<Reals>(*in);
-        BitsPack<metricType> out; out.resize(viterbi->getOutputSize(soft.size())/sizeof(pack_t<metricType>)); // assume soft contains coded pairs -> decode to bits (simple approach)
+        BitsPack<metricType> out; out.resize(viterbi->getOutputSize(soft.size())/sizeof(decPack_t)); // assume soft contains coded pairs -> decode to bits (simple approach)
 		float gpuKernelTime;
 		viterbi->run(soft.data(), out.data(), soft.size(), &gpuKernelTime);
 		printf("Viterbi GPU kernel time: %f ms\n", gpuKernelTime);

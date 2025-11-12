@@ -14,13 +14,17 @@ enum class Bit : uint8_t { OFF=0, ON=1 };
 using Bits = std::vector<Bit>;
 using Soft = std::vector<uint8_t>;
 using Reals = std::vector<float>;
-template<Metric metricType> using BitsPack = std::vector<pack_t<metricType>>; // packed bits (8 bits per byte)
+template<Metric metricType> using BitsPack = std::vector<typename ViterbiCUDA<metricType>::decPack_t>; // packed bits (8 bits per byte)
 using Data = std::variant<Bits, Soft, Reals, BitsPack<Metric::B16>, BitsPack<Metric::B32>>;
 using OptData = std::optional<Data>;
 
 // Base class
-struct ComputeElement {
-    bool is_probed = false;
+class ComputeElement {
+    private:
+    bool is_probed;
+
+    public:
+    ComputeElement() : is_probed(false) {}
     virtual ~ComputeElement() = default;
     // If in == std::nullopt, element should generate its own data (e.g. RandBitGen)
     virtual Data process(const OptData& in) = 0;
@@ -30,6 +34,8 @@ struct ComputeElement {
         is_probed = true;
         return *this;
     }
+
+    bool isProbed() const { return is_probed; }
 };
 
 // The result of a pipeline run, containing the final output and any probed intermediate values.
@@ -39,8 +45,11 @@ struct PipelineResult {
 };
 
 // Pipeline container
-struct Pipeline {
+class Pipeline {
+    private:
     std::vector<ComputeElement*> elems;
+
+    public:
     Pipeline() = default;
     Pipeline& add(ComputeElement& e){ elems.push_back(&e); return *this; }
 
@@ -49,7 +58,7 @@ struct Pipeline {
         std::vector<Data> probes;
         for(auto e : elems){
             cur = e->process(cur);
-            if(e->is_probed) {
+            if(e->isProbed()) {
                 probes.push_back(*cur);
             }
         }
@@ -72,9 +81,12 @@ inline Pipeline operator|(Pipeline p, ComputeElement& b){
 // ----- Example building blocks -----
 
 // 1) Random bit generator
-struct RandBitGen : ComputeElement {
+class RandBitGen : public ComputeElement {
+    private:
     size_t n;
     std::mt19937 rng;
+
+    public:
     RandBitGen(size_t n_, unsigned seed=0) : n(n_), rng(seed) {}
     Data process(const OptData& in) override {
         Bits out; out.reserve(n);
@@ -85,9 +97,12 @@ struct RandBitGen : ComputeElement {
 };
 
 // 2) Convolutional encoder (simple version matching convEnc in vit_main.cu)
-struct ConvolutionalEncoder : ComputeElement {
+class ConvolutionalEncoder : public ComputeElement {
+    private:
     int CLength;
     uint32_t polyn0, polyn1;
+
+    public:
     ConvolutionalEncoder(int CLength_, uint32_t p0, uint32_t p1) : CLength(CLength_), polyn0(p0), polyn1(p1) {}
     Data process(const OptData& in) override {
         if(!in) throw std::runtime_error("ConvolutionalEncoder expects input bits");
@@ -112,9 +127,12 @@ struct ConvolutionalEncoder : ComputeElement {
 };
 
 // 3) Add Gaussian noise and produce soft floats
-struct AddNoise : ComputeElement {
+class AddNoise : public ComputeElement {
+    private:
     float stddev;
     unsigned seed;
+
+    public:
     AddNoise(float stddev_, unsigned seed_=0) : stddev(stddev_), seed(seed_) {}
     Data process(const OptData& in) override {
         if(!in) throw std::runtime_error("AddNoise expects input bits");
@@ -131,13 +149,11 @@ struct AddNoise : ComputeElement {
 };
 
 // 4) SoftDecisionPacker (example: pack floats into same vector or perform quantization)
-struct SoftDecisionPacker : ComputeElement {
+class SoftDecisionPacker : public ComputeElement {
+    private:
     Input cfg;
     float scale; // optional scaling applied before quantization
 
-    SoftDecisionPacker(Input cfg_, float scale_ = 1.0f) : cfg(cfg_), scale(scale_) {}
-
-private:
     static inline uint8_t pack_hard_byte(const float *vals){
         uint8_t b = 0;
         for(size_t k=0; k<8; ++k){
@@ -163,7 +179,8 @@ private:
         return static_cast<uint8_t>(q & 0xFF);
     }
 
-public:
+    public:
+    SoftDecisionPacker(Input cfg_, float scale_ = 1.0f) : cfg(cfg_), scale(scale_) {}
     Data process(const OptData& in) override {
         if(!in) throw std::runtime_error("SoftDecisionPacker expects input reals");
         const Reals& src = std::get<Reals>(*in);

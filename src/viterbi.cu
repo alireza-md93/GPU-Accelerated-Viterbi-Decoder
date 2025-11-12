@@ -46,6 +46,9 @@ constexpr int extraR = ViterbiCUDA<Metric::B16>::extraR;
 constexpr int slideSize = ViterbiCUDA<Metric::B16>::slideSize;
 constexpr int shmemWidth = ViterbiCUDA<Metric::B16>::shMemWidth;
 
+template<Metric metricType> using metric_t = typename ViterbiCUDA<metricType>::metric_t;
+template<Metric metricType> using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
+
 template<Metric metricType>
 ViterbiCUDA<metricType>::ViterbiCUDA()
 : pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(100) 
@@ -95,7 +98,7 @@ template<Metric metricType> size_t ViterbiCUDA<metricType>::getOutputSize(size_t
 {return (getMessageLen(inputNum)/8);}
 
 template<Metric metricType> size_t ViterbiCUDA<metricType>::getSharedMemSize()
-{return (shmemWidth * 4 * sizeof(metric<metricType>) * blockDimY);}
+{return (shmemWidth * 4 * sizeof(metric_t) * blockDimY);}
 
 template<Metric metricType> size_t ViterbiCUDA<metricType>::getPathPrevSize()
 {return (shmemWidth / 8 * (1<<(constLen-1)) * blocksNum_total);}
@@ -110,20 +113,20 @@ void ViterbiCUDA<metricType>::deviceSetup(){
 }
 
 template<Metric metricType>
-__device__ void bmCalc(int stage, int num, metric<metricType> branchMetric[][4], float* coded){
+__device__ void bmCalc(int stage, int num, metric_t<metricType> branchMetric[][4], float* coded){
 	for(int i=stage+tx; i<stage+num; i+=bdx){
-		branchMetric[i%shmemWidth][0] = (metric<metricType>)((-coded[2*i] - coded[2*i+1]) * 20.0f);
-		branchMetric[i%shmemWidth][1] = (metric<metricType>)((-coded[2*i] + coded[2*i+1]) * 20.0f);
-		branchMetric[i%shmemWidth][2] = (metric<metricType>)(( coded[2*i] - coded[2*i+1]) * 20.0f);
-		branchMetric[i%shmemWidth][3] = (metric<metricType>)(( coded[2*i] + coded[2*i+1]) * 20.0f);
+		branchMetric[i%shmemWidth][0] = (metric_t<metricType>)((-coded[2*i] - coded[2*i+1]) * 20.0f);
+		branchMetric[i%shmemWidth][1] = (metric_t<metricType>)((-coded[2*i] + coded[2*i+1]) * 20.0f);
+		branchMetric[i%shmemWidth][2] = (metric_t<metricType>)(( coded[2*i] - coded[2*i+1]) * 20.0f);
+		branchMetric[i%shmemWidth][3] = (metric_t<metricType>)(( coded[2*i] + coded[2*i+1]) * 20.0f);
 	}   
 }
 
 template<Metric metricType>
-__device__ void forwardACS(int stage, trellis<metricType>& old, trellis<metricType>& now, pack_t<metricType> pathPrev[][1<<(CL-1)], metric<metricType> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1) {}
+__device__ void forwardACS(int stage, trellis<metricType>& old, trellis<metricType>& now, decPack_t<metricType> pathPrev[][1<<(CL-1)], metric_t<metricType> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1) {}
 
 template<>
-__device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, trellis<Metric::B16>& now, pack_t<Metric::B16> pathPrev[][1<<(CL-1)], metric<Metric::B16> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, trellis<Metric::B16>& now, decPack_t<Metric::B16> pathPrev[][1<<(CL-1)], metric_t<Metric::B16> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	int ind = stage % shmemWidth;
 	int stageSE = stage % (CL-1);
 
@@ -181,7 +184,7 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 }
 
 template<>
-__device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, trellis<Metric::B32>& now, pack_t<Metric::B32> pathPrev[][1<<(CL-1)], metric<Metric::B32> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, trellis<Metric::B32>& now, decPack_t<Metric::B32> pathPrev[][1<<(CL-1)], metric_t<Metric::B32> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	int ind = stage % shmemWidth;
 	int stageSE = stage % (CL-1);
 
@@ -270,18 +273,18 @@ __device__ void bmIndCalc(unsigned int& allBmInd0, unsigned int& allBmInd1){
 }
 
 template<Metric metricType>
-__device__ void traceback(int endStage, int dataEndInd, int tbLength, pack_t<metricType>* data, pack_t<metricType> pathPrev[][1<<(CL-1)]){
+__device__ void traceback(int endStage, int dataEndInd, int tbLength, decPack_t<metricType>* data, decPack_t<metricType> pathPrev[][1<<(CL-1)]){
 	if(tx == 0){
 		int winnerState = 0;
 	
 		for(int s=0; s<extraR-metricType; s+=metricType){
-			pack_t<metricType> pp = pathPrev[((endStage - s) % shmemWidth)/metricType][winnerState];
+			decPack_t<metricType> pp = pathPrev[((endStage - s) % shmemWidth)/metricType][winnerState];
 			winnerState = __brev(pp<<(32-metricType)) & ((1U<<(CL-1))-1);
 		}
 		
 		for(int s=0; s<tbLength; s+=metricType){
 			int i = (endStage - extraR - s) % shmemWidth;
-			pack_t<metricType> pp = pathPrev[i/metricType][winnerState];
+			decPack_t<metricType> pp = pathPrev[i/metricType][winnerState];
 			data[(dataEndInd-s)/metricType] = pp;
 			winnerState = __brev(pp<<(32-metricType)) & ((1U<<(CL-1))-1);
 		}
@@ -292,16 +295,16 @@ __device__ void traceback(int endStage, int dataEndInd, int tbLength, pack_t<met
 //the main core of viterbi decoder
 //get data and polynoials ans decode 
 template<Metric metricType>
-__global__ void viterbi_core(pack_t<metricType>* data, float* coded, size_t messageLen, pack_t<metricType>* pathPrev_all) {
+__global__ void viterbi_core(decPack_t<metricType>* data, float* coded, size_t messageLen, decPack_t<metricType>* pathPrev_all) {
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
 	
 	extern __shared__ int sharedMem[];
-	metric<metricType>* sharedMemTip = reinterpret_cast<metric<metricType>*>(sharedMem);
+	metric_t<metricType>* sharedMemTip = reinterpret_cast<metric_t<metricType>*>(sharedMem);
 	sharedMemTip += ty * (shmemWidth * 4);
-	metric<metricType> (*branchMetric)[4] = (metric<metricType>(*)[4])sharedMemTip;
+	metric_t<metricType> (*branchMetric)[4] = (metric_t<metricType>(*)[4])sharedMemTip;
 
-	pack_t<metricType> (*pathPrev) [1<<(CL-1)] = (pack_t<metricType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((shmemWidth-1)/metricType+1);
+	decPack_t<metricType> (*pathPrev) [1<<(CL-1)] = (decPack_t<metricType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((shmemWidth-1)/metricType+1);
 	
 	size_t packNum = messageLen / metricType;
 	size_t decLen = packNum / (gdx * bdy);
@@ -348,7 +351,7 @@ __global__ void viterbi_core(pack_t<metricType>* data, float* coded, size_t mess
 
 //-----------------------------------------------------------------------------
 template<Metric metricType>
-void ViterbiCUDA<metricType>::run(float* input_h, pack_t<metricType>* output_h, size_t inputNum, float* kernelTime){
+void ViterbiCUDA<metricType>::run(float* input_h, decPack_t* output_h, size_t inputNum, float* kernelTime){
 	size_t inputSize = getInputSize(inputNum);
 	size_t messageLen = getMessageLen(inputNum);
 	size_t outputSize = getOutputSize(inputNum);
