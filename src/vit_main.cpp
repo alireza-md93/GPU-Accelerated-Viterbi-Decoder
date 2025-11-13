@@ -3,38 +3,9 @@
 #include <time.h>
 #include <math.h>
 #include <iostream>
-#include <memory>
-
-#include "viterbi.h"
-#include "dataflow.h"
-
+#include "viterbiDF.h"
 
 void parseArg(int argc, char *argv[], int& messageLen, float& snr);
-
-template<Metric metricType>
-struct ViterbiDecoder : ComputeElement {
-private:
-	std::unique_ptr<ViterbiCUDA<metricType>> viterbi;
-
-public:
-    using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
-    static constexpr int bitsPerPack = ViterbiCUDA<metricType>::bitsPerPack;
-    // In real project this would call your GPU viterbi_run
-    ViterbiDecoder(): viterbi(new ViterbiCUDA<metricType>()) {}
-	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<metricType>(messageLen)) {}
-	~ViterbiDecoder() = default;
-    Data process(const OptData& in) override {
-        if(!in) throw std::runtime_error("ViterbiDecoder expects input reals");
-        Reals soft = std::get<Reals>(*in);
-        BitsPack<metricType> out; out.resize(viterbi->getOutputSize(soft.size())/sizeof(decPack_t)); // assume soft contains coded pairs -> decode to bits (simple approach)
-		float gpuKernelTime;
-		viterbi->run(soft.data(), out.data(), soft.size(), &gpuKernelTime);
-		printf("Viterbi GPU kernel time: %f ms\n", gpuKernelTime);
-        return out;
-    }
-};
-template struct ViterbiDecoder<Metric::B16>;
-template struct ViterbiDecoder<Metric::B32>;
 
 int main(int argc, char *argv[]) {
 
@@ -53,6 +24,7 @@ int main(int argc, char *argv[]) {
 	
 	// --- Dataflow Pipeline Setup ---
 	std::random_device rd;
+	// RandBitGen randGen(messageLen_ext, 0);
 	RandBitGen randGen(messageLen_ext, rd());
     ConvolutionalEncoder convEnc(ViterbiCUDA<metricType>::constLen, ViterbiCUDA<metricType>::polyn1, ViterbiCUDA<metricType>::polyn2);
     AddNoise noise(pow(10, -snr/20.0));
@@ -62,17 +34,21 @@ int main(int argc, char *argv[]) {
     // Build the pipeline, probing the output of the noise adder.
     Pipeline pipe = randGen.probe() | convEnc | noise | viterbi;
     PipelineResult result = pipe.run();
-	int BENs;//bit error number; 
+    printf("firs outpu:%x\n", std::any_cast<std::vector<unsigned int>>(result.final_output)[0]);
+	int BENs;//bit error number;
 	double BERs;//bit error rate
 	int minInd, maxInd;
 	BENs = 0;
-	minInd=-1; //minimum index of errors
+	minInd = -1; //minimum index of errors
 	maxInd = 0; //maximum index of errors
-    size_t decodedBitsLen = std::get<BitsPack<metricType>>(result.final_output).size()*bitsPerPack;
-	for(int i=0; i<decodedBitsLen; i++){
-		bool decodedBit = (std::get<BitsPack<metricType>>(result.final_output)[i/bitsPerPack] & (1U<<((bitsPerPack-1)-(i%bitsPerPack)))) == 0 ? false : true;
-		bool genBit = (std::get<Bits>(result.probed_outputs[0])[i+ViterbiCUDA<metricType>::extraL] == Bit::ON) ? true : false;
-		if(decodedBit != genBit){
+    size_t decodedBitsLen = std::any_cast<typename ViterbiDecoder<metricType>::decVec_t>(result.final_output).size()*bitsPerPack;
+    typename ViterbiDecoder<metricType>::decVec_t decodedBitsVector = std::any_cast<typename ViterbiDecoder<metricType>::decVec_t>(result.final_output);
+	Bits genBitsVector = std::any_cast<Bits>(result.probed_outputs[0]);
+    for(int i=0; i<decodedBitsLen; i++){
+		bool decodedBit = (decodedBitsVector[i/bitsPerPack] & (1U<<((bitsPerPack-1)-(i%bitsPerPack)))) == 0 ? false : true;
+		bool genBit = (genBitsVector[i+ViterbiCUDA<metricType>::extraL] == Bit::ON) ? true : false;
+		// if(i<10)std::cout << i << "\t" << "decodedBit:" << decodedBit << "\tgenBit: " << genBit << std::endl;
+        if(decodedBit != genBit){
 			// printf(":%d\n", i);
 			BENs++;
 			maxInd = i;
@@ -87,9 +63,6 @@ int main(int argc, char *argv[]) {
 	printf("min:%d\tmax:%d\n", minInd, maxInd);
 	printf("BEN:%d   \tBER:%f\n", BENs, BERs);
     std::cout << "Number of probed outputs: " << result.probed_outputs.size() << std::endl;
-    if (!result.probed_outputs.empty()) {
-        std::cout << "Probed output type index: " << result.probed_outputs[0].index() << std::endl;
-    }
     // --- End of Pipeline Section ---
 	
 	
