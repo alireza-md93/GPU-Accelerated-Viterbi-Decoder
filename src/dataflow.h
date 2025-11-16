@@ -52,7 +52,7 @@ public:
 
 
     std::string getStatusStringAll(const std::string& key) const {
-        if(key == "elapsed run time") {
+        if(key == "Elapsed run time") {
             const auto& value = getStatus(key);
             auto us = std::any_cast<std::chrono::microseconds>(value).count();
             std::stringstream ss;
@@ -90,10 +90,10 @@ public:
         for(auto e : elems) {
             auto start = std::chrono::high_resolution_clock::now();
             // std::cout << "Processing element: " << typeid(*e).name() << std::endl;
-            cur = e->process(cur);
+            cur = e->process(std::move(cur));
             auto end = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-            e->setStatus("elapsed run time", duration);
+            e->setStatus("Elapsed run time", duration);
 
             if(e->isProbed()) {
                 probes.push_back(*cur);

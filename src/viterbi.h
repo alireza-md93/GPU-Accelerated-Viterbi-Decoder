@@ -23,7 +23,7 @@ class ViterbiCUDA{
 	static constexpr int extraR_raw = 32;
 	static constexpr int extraL = roundup(extraL_raw, bitsPerPack) - (constLen - 1);
 	static constexpr int extraR = roundup(extraR_raw, bitsPerPack) + (constLen - 1);
-	static constexpr int slideSize = 128;
+	static constexpr int slideSize = 32;
 	static constexpr int shMemWidth = extraL + slideSize + extraR;
     static constexpr int blockDimY = 2;
 	

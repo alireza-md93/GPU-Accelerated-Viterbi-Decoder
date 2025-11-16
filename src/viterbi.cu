@@ -58,7 +58,7 @@ struct ViterbiCUDA<metricType>::Impl {
 
 template<Metric metricType>
 ViterbiCUDA<metricType>::ViterbiCUDA()
-: pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(100) 
+: pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(16*400) 
 {
 	deviceSetup();
 	pImpl = new Impl();
@@ -198,6 +198,31 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 		now.pp = (now.pp << 1) | cond;
 
 		old = now;
+	}
+
+	if(stage % 100 == 0){
+		metric_t<Metric::B16> pmMin = static_cast<metric_t<Metric::B16>>(now.pm & 0x0000ffff);
+		metric_t<Metric::B16> pmMax = static_cast<metric_t<Metric::B16>>(now.pm >> 16);
+		if(pmMin > pmMax){
+			metric_t<Metric::B16> temp = pmMin;
+			pmMin = pmMax;
+			pmMax = temp;
+		}
+
+		if(__any_sync(0xffffffff, pmMax > (1<<14))){
+			for(unsigned int delta=16; delta>0; delta/=2)
+				pmMin = min(pmMin, __shfl_down_sync(0xffffffff, pmMin, delta));
+
+			unsigned int pmMinX2 = static_cast<unsigned int>(static_cast<uint16_t>(pmMin));
+			pmMinX2 = (pmMinX2 << 16) | pmMinX2;
+			pmMinX2 = __shfl_sync(0xffffffff, pmMinX2, 0);
+			now.pm = __vsub2(now.pm, pmMinX2);
+			old.pm = now.pm;
+
+			// if(bx==0 && by==0 && ty==0 && tx==0){
+			// 	printf("Stage %d: PM min=%d\n", stage, pmMin);
+			// }
+		}
 	}
 
 	allBmInd0 = (allBmInd0 >> 2) | ((allBmInd0&3) << (2*(CL-2)));

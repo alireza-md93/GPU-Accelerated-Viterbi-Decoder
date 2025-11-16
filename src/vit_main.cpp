@@ -13,7 +13,7 @@ int main(int argc, char *argv[]) {
     int messageLen;
 	float snr;
     parseArg(argc, argv, messageLen, snr);
-	constexpr Metric metricType = Metric::B32;
+	constexpr Metric metricType = Metric::B16;
 	constexpr Input inputType = Input::SOFT8;
 	int messageLen_ext = messageLen + ViterbiCUDA<metricType>::extraL + ViterbiCUDA<metricType>::extraR;
 	int bitsPerPack = ViterbiDecoder<metricType>::bitsPerPack;
@@ -34,7 +34,6 @@ int main(int argc, char *argv[]) {
     // Build the pipeline, probing the output of the noise adder.
     Pipeline pipe = randGen.probe() | convEnc | noise | viterbi;
     PipelineResult result = pipe.run();
-    std::cout << "\n--- Pipeline Status ---\n";
     pipe.printStatus();
 	int BENs;//bit error number;
 	double BERs;//bit error rate
