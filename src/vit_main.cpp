@@ -34,7 +34,8 @@ int main(int argc, char *argv[]) {
     // Build the pipeline, probing the output of the noise adder.
     Pipeline pipe = randGen.probe() | convEnc | noise | viterbi;
     PipelineResult result = pipe.run();
-    printf("firs outpu:%x\n", std::any_cast<std::vector<unsigned int>>(result.final_output)[0]);
+    std::cout << "\n--- Pipeline Status ---\n";
+    pipe.printStatus();
 	int BENs;//bit error number;
 	double BERs;//bit error rate
 	int minInd, maxInd;

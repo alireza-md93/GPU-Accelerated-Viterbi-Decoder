@@ -1,5 +1,5 @@
 #include "cuda_runtime.h"
-#include "gputimer.h"
+// #include "gputimer.h"
 #include "gpuerrors.h"
 #include "viterbi.h"
 #include <stdio.h>
@@ -51,10 +51,17 @@ template<Metric metricType> using metric_t = typename ViterbiCUDA<metricType>::m
 template<Metric metricType> using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
 
 template<Metric metricType>
+struct ViterbiCUDA<metricType>::Impl {
+	cudaEvent_t start; 
+	cudaEvent_t stop;
+};
+
+template<Metric metricType>
 ViterbiCUDA<metricType>::ViterbiCUDA()
 : pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(100) 
 {
 	deviceSetup();
+	pImpl = new Impl();
 }
 
 template<Metric metricType>
@@ -68,6 +75,7 @@ ViterbiCUDA<metricType>::ViterbiCUDA(size_t inputNum)
 template<Metric metricType>
 ViterbiCUDA<metricType>::~ViterbiCUDA(){
 	memFree();
+	delete pImpl;
 }
 
 template<Metric metricType>
@@ -103,6 +111,31 @@ template<Metric metricType> size_t ViterbiCUDA<metricType>::getSharedMemSize()
 
 template<Metric metricType> size_t ViterbiCUDA<metricType>::getPathPrevSize()
 {return (shmemWidth / 8 * (1<<(constLen-1)) * blocksNum_total);}
+
+template<Metric metricType> void ViterbiCUDA<metricType>::timerSetup(){
+	cudaEventCreate(&(pImpl->start));
+	cudaEventCreate(&(pImpl->stop));
+}
+
+template<Metric metricType> void ViterbiCUDA<metricType>::timerStart(){
+	cudaEventRecord(pImpl->start, 0);
+}
+
+template<Metric metricType> void ViterbiCUDA<metricType>::timerStop(){
+	cudaEventRecord(pImpl->stop, 0);
+}
+
+template<Metric metricType> float ViterbiCUDA<metricType>::timerElapsed(){
+	float elapsed;
+	cudaEventSynchronize(pImpl->stop);
+	cudaEventElapsedTime(&elapsed, pImpl->start, pImpl->stop);
+	return elapsed;
+}
+
+template<Metric metricType> void ViterbiCUDA<metricType>::timerDelete(){
+	cudaEventDestroy(pImpl->start);
+	cudaEventDestroy(pImpl->stop);
+}
 
 template<Metric metricType>
 void ViterbiCUDA<metricType>::deviceSetup(){
@@ -362,14 +395,18 @@ void ViterbiCUDA<metricType>::run(float* input_h, decPack_t* output_h, size_t in
 
 	HANDLE_ERROR(cudaMemcpy(enc_d, input_h, inputSize, cudaMemcpyHostToDevice));
 	
-	GpuTimer timer;
 	dim3 grid (blocksNum_total/blockDimY, 1, 1); 
 	dim3 block (32, blockDimY, 1);
 
-	timer.Start();
+	if(kernelTime){
+		timerSetup();
+		timerStart();
+	}
 	viterbi_core<metricType> <<<grid, block, sharedMemSize>>> (dec_d, enc_d, messageLen, pathPrev_d);
-	timer.Stop();
-	if(kernelTime) *kernelTime = timer.Elapsed();
+	if(kernelTime){
+		timerStop();
+		*kernelTime = timerElapsed();
+	}
 	HANDLE_ERROR(   cudaPeekAtLastError()   );
 
 	HANDLE_ERROR(cudaMemcpy(output_h, dec_d, outputSize, cudaMemcpyDeviceToHost));

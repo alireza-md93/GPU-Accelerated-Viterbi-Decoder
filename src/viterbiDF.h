@@ -179,8 +179,20 @@ public:
         out.resize(viterbi->getOutputSize(soft.size())/sizeof(decPack_t));
 		float gpuKernelTime;
 		viterbi->run(soft.data(), out.data(), soft.size(), &gpuKernelTime);
-		printf("Viterbi GPU kernel time: %f ms\n", gpuKernelTime);
+        setStatus("GPU kernel time", gpuKernelTime);
         return out;
+    }
+    std::string getStatusString(const std::string& key) const override {
+        if(key == "GPU kernel time") {
+            const auto valueAny = getStatus(key);
+            float value = std::any_cast<float>(valueAny);
+            std::stringstream ss;
+            if(value < 1.0f)            {ss << std::fixed << std::setprecision(3) << value*1000.0f << " us";}
+            else if(value < 1000.0f)    {ss << std::fixed << std::setprecision(3) << value << " ms";}
+            else                        {ss << std::fixed << std::setprecision(3) << value/1000.0f << " s";}
+            return ss.str();
+        }
+        return ComputeElement::getStatusString(key);
     }
 };
 template struct ViterbiDecoder<Metric::B16>;

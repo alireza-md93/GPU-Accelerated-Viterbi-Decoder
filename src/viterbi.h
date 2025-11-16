@@ -43,11 +43,18 @@ private:
 	float* enc_d;
 	bool preAllocated;
 	int blocksNum_total;
-
+	struct Impl;
+	Impl* pImpl;
 
 	void memAlloc(size_t inputNum);
 	void memFree();
 	void deviceSetup();
+
+	void timerSetup();
+	void timerDelete();
+	void timerStart();
+	void timerStop();
+	float timerElapsed();
 
 	size_t getSharedMemSize();
 	size_t getPathPrevSize();
