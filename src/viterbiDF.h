@@ -66,16 +66,26 @@ class AddNoise : public ComputeElement {
     unsigned seed;
 
     public:
-    AddNoise(float stddev_, unsigned seed_=0) : stddev(stddev_), seed(seed_) {}
+    AddNoise(float stddev_=std::numeric_limits<float>::infinity(), unsigned seed_=0) : stddev(stddev_), seed(seed_) {}
     std::any process(const OptData& in) override {
         if(!in) throw std::runtime_error("AddNoise expects input bits");
         Bits bits = std::any_cast<Bits>(*in);
         Reals out; out.reserve(bits.size());
         std::mt19937 rng(seed);
         std::normal_distribution<float> d(0.0f, stddev);
-        for(Bit b : bits){
-            float base = (b == Bit::ON) ? 1.0f : -1.0f;
-            out.push_back(base + d(rng));
+        if(stddev == std::numeric_limits<float>::infinity()){
+            // no noise case
+            for(Bit b : bits){
+                float val = (b == Bit::ON) ? 1.0f : -1.0f;
+                out.push_back(val);
+            }
+        }
+        else{
+            // noise case
+            for(Bit b : bits){
+                float base = (b == Bit::ON) ? 1.0f : -1.0f;
+                out.push_back(base + d(rng));
+            }
         }
         return out;
     }

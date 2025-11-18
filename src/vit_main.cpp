@@ -13,7 +13,7 @@ int main(int argc, char *argv[]) {
     int messageLen;
 	float snr;
     parseArg(argc, argv, messageLen, snr);
-	constexpr Metric metricType = Metric::B16;
+	constexpr Metric metricType = Metric::B32;
 	constexpr Input inputType = Input::SOFT8;
 	int messageLen_ext = messageLen + ViterbiCUDA<metricType>::extraL + ViterbiCUDA<metricType>::extraR;
 	int bitsPerPack = ViterbiDecoder<metricType>::bitsPerPack;
@@ -27,7 +27,8 @@ int main(int argc, char *argv[]) {
 	// RandBitGen randGen(messageLen_ext, 0);
 	RandBitGen randGen(messageLen_ext, rd());
     ConvolutionalEncoder convEnc(ViterbiCUDA<metricType>::constLen, ViterbiCUDA<metricType>::polyn1, ViterbiCUDA<metricType>::polyn2);
-    AddNoise noise(pow(10, -snr/20.0));
+    // AddNoise noise(pow(10, -snr/20.0), rd());
+    AddNoise noise(std::numeric_limits<float>::infinity());
     SoftDecisionPacker packer(inputType);
     ViterbiDecoder<metricType> viterbi;
 

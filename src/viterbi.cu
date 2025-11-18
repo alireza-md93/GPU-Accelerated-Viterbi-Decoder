@@ -169,6 +169,8 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 		bms = (bms << 16) | (uint16_t)branchMetric[ind][allBmInd0&3];
 
 		unsigned int pmRev = __funnelshift_l(old.pm, old.pm, 16);
+
+		//------------------------- DPX ---------------------------
 		now.pm = __viaddmax_s16x2(old.pm, __vadd2(bms, bms), pmRev);
 		unsigned int cond = __vcmpeq2(now.pm, pmRev);
 		now.pm = __vsub2(now.pm, bms);
@@ -177,6 +179,16 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 		cond &= 0x00010001;
 		cond ^= 1;
 		now.pp = (now.pp << 1) | cond;
+		//------------------------- DPX ---------------------------
+
+		//------------------------- Reg ---------------------------
+		// bool condH, condL;
+		// now.pm = __vibmax_s16x2(__vadd2(old.pm, bms), __vadd2(pmRev, __vneg2(bms)), &condH, &condL);
+		// unsigned int permMap = (condH?0x00002200U:0U) | (condL?0U:0x00000022U) | 0x00001010;
+		// now.pp = __byte_perm(old.pp, 0, permMap);
+		// unsigned int padd = (condH?0U:0x00010000U) | (condL?0x00000001U:0U);
+		// now.pp = (now.pp << 1) | padd; 
+		//------------------------- Reg ---------------------------
 
 		old = now;
 	}
@@ -188,14 +200,26 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 		unsigned int bms = (uint16_t)branchMetric[ind][allBmInd0&3];
 		bms = (bms << 16) | (uint16_t)branchMetric[ind][allBmInd1&3];
 		
+		//------------------------- DPX ---------------------------
 		unsigned int pmMax = __viaddmax_s16x2(old.pm, __vadd2(bms, bms), now.pm);
 		unsigned int cond = __vcmpeq2(pmMax, now.pm);
 		now.pm = __vsub2(pmMax, bms);
-		unsigned int permMap = ((cond>>8) & 0x0000cccc) | 0x00003210;
+		unsigned int permMap = ((cond>>8) & 0x00004444) | 0x00003210;
 		now.pp = __byte_perm(old.pp, now.pp, permMap);
 		cond &= 0x00010001;
 		cond ^= (tx & laneMask) ? 0x00010001 : 0;
 		now.pp = (now.pp << 1) | cond;
+		//------------------------- DPX ---------------------------
+
+		//------------------------- Reg ---------------------------
+		// bool condH, condL;
+		// now.pm = __vibmax_s16x2(__vadd2(old.pm, bms), __vadd2(now.pm, __vneg2(bms)), &condH, &condL);
+		// unsigned int permMap = (condH?0x00004400U:0U) | (condL?0x00000044U:0U) | 0x00003210;
+		// now.pp = __byte_perm(now.pp, old.pp, permMap);
+		// unsigned int padd = (condH?0U:0x00010000U) | (condL?0U:0x00000001U);
+		// padd ^= (tx & laneMask) ? 0x00010001 : 0;
+		// now.pp = (now.pp << 1) | padd; 
+		//------------------------- Reg ---------------------------
 
 		old = now;
 	}
@@ -250,18 +274,37 @@ __device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, tr
 	if(stageSE < CL-6){
 		int bm = branchMetric[ind][allBmInd0&3];
 
+		//------------------------- DPX ---------------------------
 		now.pm0 = __viaddmax_s32(old.pm0, bm*2, old.pm1);
-		int cond0 = (now.pm0 == old.pm1 ? 1 : 0);
+		bool cond0 = (now.pm0 == old.pm1 ? 1 : 0);
 		now.pm0 = now.pm0 - bm;
 		now.pp0 = cond0 ? old.pp1 : old.pp0;
 		now.pp0 = (now.pp0 << 1) | cond0;
+		//------------------------- DPX ---------------------------
+
+		//------------------------- Reg ---------------------------
+		// bool cond0;
+		// now.pm0 = __vibmax_s32(old.pm1-bm, old.pm0+bm, &cond0);
+		// now.pp0 = cond0 ? old.pp1 : old.pp0;
+		// now.pp0 = (now.pp0 << 1) | cond0;
+		//------------------------- Reg ---------------------------
 
 
+
+		//------------------------- DPX ---------------------------
 		now.pm1 = __viaddmax_s32(old.pm1, bm*2, old.pm0);
-		int cond1 = (now.pm1 == old.pm0 ? 0 : 1);
+		bool cond1 = (now.pm1 == old.pm0 ? 0 : 1);
 		now.pm1 = now.pm1 - bm;
 		now.pp1 = cond1 ? old.pp1 : old.pp0;
 		now.pp1 = (now.pp1 << 1) | cond1;
+		//------------------------- DPX ---------------------------
+
+		//------------------------- Reg ---------------------------
+		// bool cond1;
+		// now.pm1 = __vibmax_s32(old.pm1+bm, old.pm0-bm, &cond1);
+		// now.pp1 = cond1 ? old.pp1 : old.pp0;
+		// now.pp1 = (now.pp1 << 1) | cond1;
+		//------------------------- Reg ---------------------------
 
 		old = now;
 	}
@@ -275,19 +318,41 @@ __device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, tr
 		int bm0 = branchMetric[ind][allBmInd0&3];
 		int bm1 = branchMetric[ind][allBmInd1&3];
 		
+		//------------------------- DPX ---------------------------
 		int pmMax0 = __viaddmax_s32(old.pm0, bm0*2, now.pm0);
 		bool cond0 = (pmMax0 == now.pm0);
 		now.pm0 = pmMax0 - bm0;
 		now.pp0 = cond0 ? now.pp0 : old.pp0;
 		cond0 ^= ((tx & laneMask) != 0);
 		now.pp0 = (now.pp0 << 1) | cond0;
+		//------------------------- DPX ---------------------------
 
+		//------------------------- Reg ---------------------------
+		// bool cond0;
+		// now.pm0 = __vibmax_s32(now.pm0 - bm0, old.pm0 + bm0, &cond0);
+		// now.pp0 = cond0 ? now.pp0 : old.pp0;
+		// cond0 ^= ((tx & laneMask) != 0);
+		// now.pp0 = (now.pp0 << 1) | cond0;
+		//------------------------- Reg ---------------------------
+
+
+
+		//------------------------- DPX ---------------------------
 		int pmMax1 = __viaddmax_s32(old.pm1, bm1*2, now.pm1);
 		bool cond1 = (pmMax1 == now.pm1);
 		now.pm1 = pmMax1 - bm1;
 		now.pp1 = cond1 ? now.pp1 : old.pp1;
 		cond1 ^= ((tx & laneMask) != 0);
 		now.pp1 = (now.pp1 << 1) | cond1;
+		//------------------------- DPX ---------------------------
+
+		//------------------------- Reg ---------------------------
+		// bool cond1;
+		// now.pm1 = __vibmax_s32(now.pm1 - bm1, old.pm1 + bm1, &cond1);
+		// now.pp1 = cond1 ? now.pp1 : old.pp1;
+		// cond1 ^= ((tx & laneMask) != 0);
+		// now.pp1 = (now.pp1 << 1) | cond1;
+		//------------------------- Reg ---------------------------
 
 		old = now;
 	}
