@@ -6,11 +6,14 @@
 #include <vector>
 #include <random>
 #include <memory>
+#include <map>
+#include <functional>
 
 // Data type used between elements
 enum class Bit : uint8_t { OFF=0, ON=1 };
 using Bits = std::vector<Bit>;
-using Soft = std::vector<uint8_t>;
+using soft_t = int32_t;
+using Soft = std::vector<soft_t>;
 using Reals = std::vector<float>;
 
 // 1) Random bit generator
@@ -94,98 +97,86 @@ class AddNoise : public ComputeElement {
 // 4) SoftDecisionPacker (example: pack floats into same vector or perform quantization)
 class SoftDecisionPacker : public ComputeElement {
     private:
-    Input cfg;
-    float scale; // optional scaling applied before quantization
+    ChannelIn cfg;
+    float scale;
+    int dataPerPack;
+    int packLength;
 
-    static inline uint8_t pack_hard_byte(const float *vals){
-        uint8_t b = 0;
-        for(size_t k=0; k<8; ++k){
-            b <<= 1;
-            b |= (vals[k] > 0.0f) ? 1u : 0u;
-        }
-        return b;
-    }
-
-    static inline uint8_t quant4(float v){
-        // convert to signed int4 in range [-8,7], store as two's complement nibble
-        int q = (int)std::lrintf(v); // round to nearest int
-        if(q < -8) q = -8;
-        if(q > 7) q = 7;
-        return static_cast<uint8_t>(q & 0xF);
-    }
-
-    static inline uint8_t quant8(float v){
-        // convert to signed int8 range [-128,127], store as uint8 (two's complement)
-        int q = (int)std::lrintf(v);
-        if(q < -128) q = -128;
-        if(q > 127) q = 127;
-        return static_cast<uint8_t>(q & 0xFF);
-    }
+    inline static std::map<ChannelIn, std::function<soft_t(float)>> quantFuncs= {
+        {ChannelIn::HARD,   [](float v) -> soft_t { return (v > 0.0f) ? 1 : 0; }},
+        {ChannelIn::SOFT4,  [](float v) -> soft_t {
+            int q = static_cast<int>(std::lrintf(v));
+            if(q < -8) q = -8;
+            if(q > 7) q = 7;
+            return static_cast<soft_t>(q & 0xF);
+        }},
+        {ChannelIn::SOFT8,  [](float v) -> soft_t {
+            int q = static_cast<int>(std::lrintf(v));
+            if(q < -128) q = -128;
+            if(q > 127) q = 127;
+            return static_cast<soft_t>(q & 0xFF);
+        }},
+        {ChannelIn::SOFT16, [](float v) -> soft_t {
+            long q = static_cast<long>(std::lrintf(v));
+            if(q < -32768) q = -32768;
+            if(q > 32767) q = 32767;
+            return static_cast<soft_t>(q&0xFFFF);
+        }}
+    };
 
     public:
-    SoftDecisionPacker(Input cfg_, float scale_ = 1.0f) : cfg(cfg_), scale(scale_) {}
+    SoftDecisionPacker(ChannelIn cfg_, float scale_=1.0f) : cfg(cfg_), scale(scale_) {
+        size_t elementSize = sizeof(typename Soft::value_type);
+        switch(cfg){
+            case ChannelIn::HARD:    packLength = 1;  dataPerPack = elementSize * 8; break;
+            case ChannelIn::SOFT4:   packLength = 4;  dataPerPack = elementSize * 2; break;
+            case ChannelIn::SOFT8:   packLength = 8;  dataPerPack = elementSize;     break;
+            case ChannelIn::SOFT16:  packLength = 16; dataPerPack = elementSize / 2; break;
+        }
+    }
     std::any process(const OptData& in) override {
         if(!in) throw std::runtime_error("SoftDecisionPacker expects input reals");
         const Reals& src = std::any_cast<Reals>(*in);
+        if(cfg == ChannelIn::FP32) return src;
+        std::function<soft_t(float)> quant = quantFuncs.at(cfg);
         size_t n = src.size();
+
         Soft out;
-
-        if(cfg == Input::HARD){
-            // pack 8 floats -> 1 byte
-            out.reserve((n + 7) / 8);
-            for(size_t i=0; i<n; i += 8){
-                size_t available = std::min<size_t>(8, n - i);
-                float tmp[8];
-                for(size_t k=0;k<available;++k) tmp[k] = src[i+k] * scale;
-                for(size_t k=available;k<8;++k) tmp[k] = 0.0f;
-                // remaining tmp entries ignored (treated as <=0)
-                out.push_back(pack_hard_byte(tmp));
+        out.reserve(n / dataPerPack);
+        for(size_t i=0; i<n; i += dataPerPack){
+            uint32_t b = 0;
+            for(size_t j=i; j<i+dataPerPack; ++j){
+                b <<= packLength;
+                b |= quant(src[j]*scale);
             }
-            return out;
+            out.push_back(static_cast<soft_t>(b));
         }
-        else if(cfg == Input::SOFT4){
-            // pack every 2 floats -> one uint8 (high nibble = first float, low nibble = second)
-            out.reserve((n + 1) / 2);
-            for(size_t i=0; i<n; i += 2){
-                float v0 = (i < n)     ? src[i]   * scale : 0.0f;
-                float v1 = (i+1 < n)   ? src[i+1] * scale : 0.0f;
-                uint8_t hi = quant4(v0);
-                uint8_t lo = quant4(v1);
-                out.push_back(static_cast<uint8_t>((hi << 4) | (lo & 0x0F)));
-            }
-            return out;
-        }
-        else if(cfg == Input::SOFT8){
-            // one float -> one uint8 (signed int8 stored as uint8)
-            out.reserve(n);
-            for(size_t i=0;i<n;++i){
-                out.push_back(quant8(src[i] * scale));
-            }
-            return out;
-        }
-
-        throw std::runtime_error("Unsupported SoftDecisionPacker configuration");
+        return out;
     }
 };
 
 // 5) Viterbi Decoder wrapper
-template<Metric metricType>
+template<Metric metricType, ChannelIn inputType>
 struct ViterbiDecoder : ComputeElement {
 private:
-	std::unique_ptr<ViterbiCUDA<metricType>> viterbi;
+	std::unique_ptr<ViterbiCUDA<metricType, inputType>> viterbi;
 
 public:
-    using decPack_t = typename ViterbiCUDA<metricType>::decPack_t;
-    using decVec_t = std::vector<typename ViterbiCUDA<metricType>::decPack_t>; // packed bits (8 bits per byte)
-    static constexpr int bitsPerPack = ViterbiCUDA<metricType>::bitsPerPack;
+    using decPack_t = typename ViterbiCUDA<metricType, inputType>::decPack_t;
+    using decVec_t = std::vector<typename ViterbiCUDA<metricType, inputType>::decPack_t>; // packed bits (8 bits per byte)
+    using encPack_t = typename ViterbiCUDA<metricType, inputType>::encPack_t;
+    static constexpr int bitsPerPack = ViterbiCUDA<metricType, inputType>::bitsPerPack;
+    static constexpr int encDataPerPack = ViterbiCUDA<metricType, inputType>::encDataPerPack;
+
     // In real project this would call your GPU viterbi_run
-    ViterbiDecoder(): viterbi(new ViterbiCUDA<metricType>()) {}
-	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<metricType>(messageLen)) {}
+    ViterbiDecoder(): viterbi(new ViterbiCUDA<metricType, inputType>()) {}
+	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<metricType, inputType>(messageLen)) {}
 	~ViterbiDecoder() = default;
     std::any process(const OptData& in) override {
         if(!in) throw std::runtime_error("ViterbiDecoder expects input reals");
-        Reals soft = std::any_cast<Reals>(*in);
+        std::vector<encPack_t> soft = std::any_cast<std::vector<encPack_t>>(*in); 
         decVec_t out; 
+        size_t decInputNum = soft.size() * encDataPerPack;
         out.resize(viterbi->getOutputSize(soft.size())/sizeof(decPack_t));
 		float gpuKernelTime;
 		viterbi->run(soft.data(), out.data(), soft.size(), &gpuKernelTime);
@@ -205,5 +196,13 @@ public:
         return ComputeElement::getStatusString(key);
     }
 };
-template struct ViterbiDecoder<Metric::B16>;
-template struct ViterbiDecoder<Metric::B32>;
+template struct ViterbiDecoder<Metric::B16, ChannelIn::HARD>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::HARD>;
+template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT4>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT4>;
+template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT8>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT8>;
+template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT16>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT16>;
+template struct ViterbiDecoder<Metric::B16, ChannelIn::FP32>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::FP32>;

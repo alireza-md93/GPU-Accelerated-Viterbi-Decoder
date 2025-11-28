@@ -22,6 +22,15 @@ In previous works on GPU-based Viterbi decoding, implementers have often used bl
     - A kernel based on **`int32` DPX intrinsics**, providing high performance on all modern NVIDIA GPUs.
     - A highly-optimized kernel using **`int16` SIMD intrinsics**, which can nearly double the performance on GPUs with Compute Capability 9.0 or higher (e.g., Ada Lovelace, Hopper).
 
+- **Flexible Input Types**: The decoder supports both hard and soft-decision inputs with varying precision levels. For all soft-decision types, a negative value is interpreted as a '0' bit and a positive value as a '1' bit.
+  - **Hard Decision**: Input type is `int32`, where each element contains 32 packed encoded bits from the channel.
+  - **4-bit Soft-Decision**: Input type is `int32`, with each element containing eight packed 4-bit soft-decision values.
+  - **8-bit Soft-Decision**: Input type is `int32`, with each element containing four packed 8-bit soft-decision values.
+  - **16-bit Soft-Decision**: Input type is `int32`, with each element containing two packed 16-bit soft-decision values.
+  - **Floating-Point Soft-Decision**: Input type is `float`, where each element represents a single soft-decision value.
+
+For all packed formats, the Most Significant Bit (MSB) corresponds to the input received earliest in time.
+
 ## How to Use
 
 ### Prerequisites
@@ -42,12 +51,32 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 # Run the simulation with default parameters
 ./main
 
-# Run with a custom message length and Signal-to-Noise Ratio (SNR)
-./main -n 1000000 -s 5.5
+# Run with a custom parameters
+./main -n 1000000 -s 5.5 -m 32 -i s4
 ```
 
 **Command-Line Options:**
 
-*   `-n, --num <integer>`: Sets the number of bits in the original message. (Default: 32,000,000)
-*   `-s, --snr <float>`: Sets the Signal-to-Noise Ratio (SNR) in dB. (Default: 15.0)
-*   `-h, --help`: Displays the help message.
+- **`-n, --num <integer>`**  
+  Number of bits in the original message.  
+  *Default:* `32,000,000`
+
+- **`-s, --snr <float>`**  
+  Signal-to-Noise Ratio (SNR) in dB.  
+  *Default:* `15.0`
+
+- **`-m, --metric <type>`**  
+  Metric type used in the decoder core. Accepted values:  
+  - `16` or `16bit` → 16-bit core  
+  - `32` or `32bit` → 32-bit core (Default)
+
+- **`-i, --input <type>`**  
+  Channel input type. Accepted values:  
+  - `HARD` or `h` (Default)
+  - `SOFT4` or `s4`  
+  - `SOFT8` or `s8`  
+  - `SOFT16` or `s16`  
+  - `FP32` or `f`
+
+- **`-h, --help`**  
+  Display the help message.
