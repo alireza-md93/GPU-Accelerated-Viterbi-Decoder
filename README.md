@@ -31,7 +31,7 @@ In previous works on GPU-based Viterbi decoding, implementers have often used bl
 
 For all packed formats, the Most Significant Bit (MSB) corresponds to the input received earliest in time.
 
-## How to Use
+## How to Run a Test
 
 ### Prerequisites
 
@@ -80,3 +80,78 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 
 - **`-h, --help`**  
   Display the help message.
+
+  ## How to Use the API
+
+  The core decoder is encapsulated within the `ViterbiCUDA` class located in the `viterbi` directory. To use the decoder, you must instantiate this class with specific template parameters that define the processing core and input data type.
+  
+  Before compilation, ensure that the desired template instantiations are enabled at the end of `viterbi/viterbi.cu`.
+
+  ### Template Parameters
+  The `ViterbiCUDA` class is templated as `ViterbiCUDA<Metric, ChannelIn>`.
+  
+  - **`Metric`**: Defines the data type for branch and path metrics (`metric_t`) and the packed decoded output (`decPack_t`).
+    - **`Metric::B16`**: Uses `uint16_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
+    - **`Metric::B32`**: Uses `uint32_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
+  
+  - **`ChannelIn`**: Defines the input data type from the channel (`encPack_t`). For soft-decision types, negative values are treated as a '0' bit and positive values as a '1' bit.
+    - **`ChannelIn::HARD`**: `int32_t` containing 32 packed 1-bit hard-decision values.
+    - **`ChannelIn::SOFT4`**: `int32_t` containing 8 packed 4-bit soft-decision values.
+    - **`ChannelIn::SOFT8`**: `int32_t` containing 4 packed 8-bit soft-decision values.
+    - **`ChannelIn::SOFT16`**: `int32_t` containing 2 packed 16-bit soft-decision values.
+    - **`ChannelIn::FP32`**: `float` representing a single soft-decision value.
+  
+  ### Class Interface
+  
+  #### Constructor
+  ```cpp
+  ViterbiCUDA();
+  ViterbiCUDA(size_t inputNum);
+  ```
+  - The default constructor prepares the decoder but allocates/deallocates memory on each `run()` call.
+  - The constructor with `inputNum` pre-allocates device memory for a fixed input size, which is more efficient for repeated calls with same-sized data. `inputNum` is the total number of encoded bits (e.g., for `SOFT8`, it is the length of the input array multiplied by 4).
+  
+  #### Main Execution
+  ```cpp
+  void run(encPack_t* input_h, decPack_t* output_h, size_t inputNum, float* kernelTime = nullptr);
+  ```
+  - Decodes the `input_h` data from the host and writes the result to the `output_h` host pointer.
+  - A few bits at the start (`extraL`) and end (`extraR`) of the output stream are omitted due to the nature of the algorithm.
+  - If a pointer is provided for `kernelTime`, it will be populated with the kernel execution time in milliseconds.
+  
+  #### Utility Functions
+  ```cpp
+  size_t getInputSize(size_t inputNum);
+  ```
+  - Calculates the required input buffer size in bytes for a given number of encoded bits (`inputNum`).
+  
+  ```cpp
+  size_t getMessageLen(size_t inputNum);
+  ```
+  - Calculates the number of decoded output bits that will be produced. This accounts for the discarded bits from the beginning and end of the stream.
+  
+  ```cpp
+  size_t getOutputSize(size_t inputNum);
+  ```
+  - Calculates the required output buffer size in bytes.
+
+  ### Example Usage
+  ```cpp
+  #include "viterbi.h"
+  
+  // Instantiate a decoder for 8-bit soft-decision inputs and a 32-bit metric core
+  ViterbiCUDA<Metric::B32, ChannelIn::SOFT8> decoder;
+  
+  size_t num_encoded_bits = 1000000;
+  size_t input_size_bytes = decoder.getInputSize(num_encoded_bits);
+  size_t output_size_bytes = decoder.getOutputSize(num_encoded_bits);
+  
+  // Allocate host memory
+  auto host_input = new ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::encPack_t[input_size_bytes / sizeof(ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::encPack_t)];
+  auto host_output = new ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::decPack_t[output_size_bytes / sizeof(ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::decPack_t)];
+  
+  // ... fill host_input with data ...
+  
+  float elapsed_time;
+  decoder.run(host_input, host_output, num_encoded_bits, &elapsed_time);
+  ```
