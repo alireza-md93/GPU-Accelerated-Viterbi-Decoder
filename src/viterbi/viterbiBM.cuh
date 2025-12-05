@@ -45,8 +45,8 @@ __device__ void bmCalc<Metric::B32, ChannelIn::HARD>
 (int stage, int num, metric_t<Metric::B32> branchMetric[][4], encPack_t<ChannelIn::HARD>* coded, bmCalcHelper<ChannelIn::HARD>& helper){
 	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>1)){
 		uint32_t data = coded[i>>4];
-		branchMetric[i%shmemWidth][helper.bmInd] = -__popc((data&helper.mask0) ^ helper.out0);
-		branchMetric[(i+(bdx>>2))%shmemWidth][helper.bmInd] = -__popc((data&helper.mask1) ^ helper.out1);
+		branchMetric[i%shmemWidth][helper.bmInd] = 1 - __popc((data&helper.mask0) ^ helper.out0);
+		branchMetric[(i+(bdx>>2))%shmemWidth][helper.bmInd] = 1 - __popc((data&helper.mask1) ^ helper.out1);
 	}
 }
 
