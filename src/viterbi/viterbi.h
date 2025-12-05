@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <type_traits>
 
-enum Metric {B16=16, B32=32};
+enum Metric {B16, B32};
 enum ChannelIn {HARD, SOFT4, SOFT8, SOFT16, FP32};
 
 template<Metric metricType, ChannelIn inputType>
@@ -29,10 +29,15 @@ class ViterbiCUDA{
 	static constexpr int slideSize = roundup(slideSize_raw, bitsPerPack);
 	static constexpr int shMemWidth = extraL + slideSize + extraR;
     static constexpr int blockDimY = 2;
+    static constexpr int FPprecision = 4;
 	static constexpr int encDataPerPack = (inputType == ChannelIn::HARD) ? (sizeof(encPack_t) * 8) :
 										(inputType == ChannelIn::SOFT4) ? (sizeof(encPack_t) * 2) :
 										(inputType == ChannelIn::SOFT8) ? (sizeof(encPack_t)) :
 										(inputType == ChannelIn::SOFT16) ? (sizeof(encPack_t) / 2) : 1;
+	static constexpr int encDataWidth = (inputType == ChannelIn::HARD) ? 1 :
+										(inputType == ChannelIn::SOFT4) ? 4 :
+										(inputType == ChannelIn::SOFT8) ? 8 :
+										(inputType == ChannelIn::SOFT16) ? 16 : FPprecision;
 	
 	ViterbiCUDA();
 	ViterbiCUDA(size_t inputNum);

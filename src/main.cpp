@@ -5,7 +5,7 @@
 #include <iostream>
 #include "viterbiDF.h"
 
-void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metricType, ChannelIn& inputType);
+void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metricType, ChannelIn& inputType, bool& verbose);
 
 template<Metric metricType, ChannelIn inputType>
 void runPipeline(int messageLen, float snr, int& BENs, bool showStatus=false);
@@ -19,38 +19,45 @@ int main(int argc, char *argv[]) {
 	ChannelIn inputType;
     int messageLen;
 	float snr;
-    parseArg(argc, argv, messageLen, snr, metricType, inputType);
-
-    std::cout << "Message Length: " << messageLen << std::endl;
-    std::cout << "SNR: " << snr << " dB" <<  std::endl;
-    std::cout << "Metric Type: " << ((metricType == Metric::B16) ? "16-bit" : "32-bit") << std::endl;
-    std::cout << "Input Channel Type: ";
-    switch(inputType){
-        case ChannelIn::HARD:
-            std::cout << "Hard Decision" << std::endl;
-            break;
-        case ChannelIn::SOFT4:
-            std::cout << "4-bit Soft Decision" << std::endl;
-            break;
-        case ChannelIn::SOFT8:
-            std::cout << "8-bit Soft Decision" << std::endl;
-            break;
-        case ChannelIn::SOFT16:
-            std::cout << "16-bit Soft Decision" << std::endl;
-            break;
-        case ChannelIn::FP32:
-            std::cout << "32-bit Floating Point" << std::endl;
-            break;
-        default:
-            std::cout << "Unknown Type" << std::endl;
-            break;
+    bool verbose;
+    parseArg(argc, argv, messageLen, snr, metricType, inputType, verbose);
+    if(metricType == Metric::B16 && inputType == ChannelIn::SOFT16){
+        std::cerr << "Error: 16-bit metric does not support 16-bit soft decision input." << std::endl;
+        return -1;
     }
-    std::cout << std::endl;
+
+    if(verbose){
+        std::cout << "Message Length: " << messageLen << std::endl;
+        std::cout << "SNR: " << snr << " dB" <<  std::endl;
+        std::cout << "Metric Type: " << ((metricType == Metric::B16) ? "16-bit" : "32-bit") << std::endl;
+        std::cout << "Input Channel Type: ";
+        switch(inputType){
+            case ChannelIn::HARD:
+                std::cout << "Hard Decision" << std::endl;
+                break;
+            case ChannelIn::SOFT4:
+                std::cout << "4-bit Soft Decision" << std::endl;
+                break;
+            case ChannelIn::SOFT8:
+                std::cout << "8-bit Soft Decision" << std::endl;
+                break;
+            case ChannelIn::SOFT16:
+                std::cout << "16-bit Soft Decision" << std::endl;
+                break;
+            case ChannelIn::FP32:
+                std::cout << "32-bit Floating Point" << std::endl;
+                break;
+            default:
+                std::cout << "Unknown Type" << std::endl;
+                break;
+        }
+        std::cout << std::endl;
+    }
 
     // --- Dataflow Pipeline Execution Section ---
     int BENs; //bit error number
     double BERs; //bit error rate
-    runPipelineWrapper(metricType, inputType, messageLen, snr, BENs, true);
+    runPipelineWrapper(metricType, inputType, messageLen, snr, BENs, verbose);
 	
 	BERs = (double)BENs / messageLen;
 
@@ -69,7 +76,7 @@ void runPipelineWrapper(Metric metricType, ChannelIn inputType, int messageLen, 
         if(inputType == ChannelIn::HARD)           runPipeline<Metric::B16, ChannelIn::HARD>(messageLen, snr, BENs, showStatus);
         else if(inputType == ChannelIn::SOFT4)     runPipeline<Metric::B16, ChannelIn::SOFT4>(messageLen, snr, BENs, showStatus);
         else if(inputType == ChannelIn::SOFT8)     runPipeline<Metric::B16, ChannelIn::SOFT8>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::B16, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
+        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::B16, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
         else if(inputType == ChannelIn::FP32)      runPipeline<Metric::B16, ChannelIn::FP32>(messageLen, snr, BENs, showStatus);
     }
     else if(metricType == Metric::B32){
@@ -102,7 +109,7 @@ void runPipeline(int messageLen, float snr, int& BENs, bool showStatus){
     ConvolutionalEncoder convEnc(CL, polyn1, polyn2);
     AddNoise noise(pow(10, -snr/5.0), rd());
     // AddNoise noise(std::numeric_limits<float>::infinity());
-    SoftDecisionPacker packer(inputType);
+    SoftDecisionPacker packer(inputType, 40000.0);
     ViterbiDecoder<metricType, inputType> viterbi;
 
     // Build the pipeline, probing the output of the noise adder.
@@ -134,14 +141,17 @@ void runPipeline(int messageLen, float snr, int& BENs, bool showStatus){
 			// 	minInd = i;
 		}
 	}
+    // printf("minInd: %d, maxInd: %d\n", minInd, maxInd);
+    // --- End of BER Calculation Section ---
 }
 
-void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metricType, ChannelIn& inputType) {
+void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metricType, ChannelIn& inputType, bool& verbose) {
     // Set default values
     messageLen = 32000000;
     snr = 15.0;
     metricType = Metric::B32;
     inputType = ChannelIn::HARD;
+    verbose = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -152,6 +162,7 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
                       << "  -s, --snr <float>        Set the Signal-to-Noise Ratio (SNR).\n"
                       << "  -m, --metric <type>      Set the metric type (16bit|16 or 32bit|32).\n"
                       << "  -i, --input <type>       Set the input channel type (HARD|h, SOFT4|s4, SOFT8|s8, SOFT16|s16, FP32|f).\n"
+                      << "  -v, --verbose            Enable verbose output.\n"
                       << "  -h, --help               Display this help message.\n";
             exit(0);
         } else if ((arg == "-n" || arg == "--num") && i + 1 < argc) {
@@ -194,6 +205,8 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
                 std::cerr << "Error: Invalid input channel type for " << arg << "." << std::endl;
                 exit(1);
             }
+        } else if (arg == "-v" || arg == "--verbose") {
+            verbose = true;
         } else {
             std::cerr << "Error: Unknown or incomplete argument: " << arg << std::endl;
             exit(1);

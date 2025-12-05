@@ -26,10 +26,10 @@ struct trellis<Metric::B32>{
 };
 
 template<Metric metricType>
-__device__ void forwardACS(int stage, trellis<metricType>& old, trellis<metricType>& now, decPack_t<metricType> pathPrev[][1<<(CL-1)], metric_t<metricType> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){}
+__device__ void forwardACS(int stage, trellis<metricType>& old, trellis<metricType>& now, decPack_t<metricType> pathPrev[][1<<(CL-1)], metric_t<metricType> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride){}
 
 template<>
-__device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, trellis<Metric::B16>& now, decPack_t<Metric::B16> pathPrev[][1<<(CL-1)], metric_t<Metric::B16> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, trellis<Metric::B16>& now, decPack_t<Metric::B16> pathPrev[][1<<(CL-1)], metric_t<Metric::B16> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride){
 	int ind = stage % shmemWidth;
 	int stageSE = stage % (CL-1);
 
@@ -93,7 +93,7 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 		old = now;
 	}
 
-	if(stage % 100 == 0){
+	if(stage % pmNormStride == 0){
 		metric_t<Metric::B16> pmMin = static_cast<metric_t<Metric::B16>>(now.pm & 0x0000ffff);
 		metric_t<Metric::B16> pmMax = static_cast<metric_t<Metric::B16>>(now.pm >> 16);
 		if(pmMin > pmMax){
@@ -102,7 +102,7 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 			pmMax = temp;
 		}
 
-		if(__any_sync(0xffffffff, pmMax > (1<<14))){
+		if(__any_sync(0xffffffff, pmMax > static_cast<metric_t<Metric::B16>>(16000))){
 			for(unsigned int delta=16; delta>0; delta/=2)
 				pmMin = min(pmMin, __shfl_down_sync(0xffffffff, pmMin, delta));
 
@@ -136,7 +136,7 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 }
 
 template<>
-__device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, trellis<Metric::B32>& now, decPack_t<Metric::B32> pathPrev[][1<<(CL-1)], metric_t<Metric::B32> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, trellis<Metric::B32>& now, decPack_t<Metric::B32> pathPrev[][1<<(CL-1)], metric_t<Metric::B32> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride){
 	int ind = stage % shmemWidth;
 	int stageSE = stage % (CL-1);
 
@@ -224,6 +224,25 @@ __device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, tr
 		//------------------------- Reg ---------------------------
 
 		old = now;
+	}
+
+	if(stage % pmNormStride == 0){
+		metric_t<Metric::B32> pmMin = now.pm0 > now.pm1 ? now.pm1 : now.pm0;
+		metric_t<Metric::B32> pmMax = now.pm0 > now.pm1 ? now.pm0 : now.pm1;
+
+		if(__any_sync(0xffffffff, pmMax > static_cast<metric_t<Metric::B32>>(1000000000))){
+			for(unsigned int delta=16; delta>0; delta/=2)
+				pmMin = min(pmMin, __shfl_down_sync(0xffffffff, pmMin, delta));
+
+			now.pm0 -= pmMin;
+			now.pm1 -= pmMin;
+			old.pm0 = now.pm0;
+			old.pm1 = now.pm1;
+
+			// if(bx==0 && by==0 && ty==0 && tx==0){
+			// 	printf("Stage %d: PM min=%d\n", stage, pmMin);
+			// }
+		}
 	}
 
 	allBmInd0 = (allBmInd0 >> 2) | ((allBmInd0&3) << (2*(CL-2)));

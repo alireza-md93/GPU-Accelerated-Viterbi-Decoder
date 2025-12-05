@@ -137,7 +137,18 @@ class SoftDecisionPacker : public ComputeElement {
     std::any process(const OptData& in) override {
         if(!in) throw std::runtime_error("SoftDecisionPacker expects input reals");
         const Reals& src = std::any_cast<Reals>(*in);
-        if(cfg == ChannelIn::FP32) return src;
+        if(cfg == ChannelIn::FP32){
+            if(scale == 1.0){
+                return src;
+            } else {
+                Reals out;
+                out.reserve(src.size());
+                for(float v : src){
+                    out.push_back(v * scale);
+                }
+                return out;
+            }
+        }
         std::function<soft_t(float)> quant = quantFuncs.at(cfg);
         size_t n = src.size();
 
@@ -202,7 +213,7 @@ template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT4>;
 template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT4>;
 template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT8>;
 template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT8>;
-template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT16>;
+//--- never to be enabled ---// template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT16>;
 template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT16>;
 template struct ViterbiDecoder<Metric::B16, ChannelIn::FP32>;
 template struct ViterbiDecoder<Metric::B32, ChannelIn::FP32>;

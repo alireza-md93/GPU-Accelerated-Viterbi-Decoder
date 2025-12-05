@@ -100,6 +100,8 @@ The compiled executable runs a simulation pipeline that generates random bits, e
     - **`ChannelIn::SOFT8`**: `int32_t` containing 4 packed 8-bit soft-decision values.
     - **`ChannelIn::SOFT16`**: `int32_t` containing 2 packed 16-bit soft-decision values.
     - **`ChannelIn::FP32`**: `float` representing a single soft-decision value.
+
+  Please make sure that `Metric::B16` and `ChannelIn::SOFT16` are not used together since the metric type must be wider that the input type to avoid overflow.
   
   ### Class Interface
   

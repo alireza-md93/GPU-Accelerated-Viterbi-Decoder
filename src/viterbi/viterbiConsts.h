@@ -20,8 +20,10 @@ constexpr int extraL = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::extraL;
 constexpr int extraR = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::extraR;
 constexpr int slideSize = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::slideSize;
 constexpr int shmemWidth = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::shMemWidth;
+constexpr int FPprecision = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::FPprecision;
 template<Metric metricType> constexpr int bpp = ViterbiCUDA<metricType, ChannelIn::HARD>::bitsPerPack;
 template<ChannelIn inputType> constexpr int dpp = ViterbiCUDA<Metric::B16, inputType>::encDataPerPack;
+template<ChannelIn inputType> constexpr int chnWidth = ViterbiCUDA<Metric::B16, inputType>::encDataWidth;
 
 template<Metric metricType> using metric_t = typename ViterbiCUDA<metricType, ChannelIn::HARD>::metric_t;
 template<Metric metricType> using decPack_t = typename ViterbiCUDA<metricType, ChannelIn::HARD>::decPack_t;
