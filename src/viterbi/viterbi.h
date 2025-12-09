@@ -2,16 +2,21 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <cuda_fp16.h>
 
-enum Metric {B16, B32};
+enum Metric {B16, B32, FP16};
 enum ChannelIn {HARD, SOFT4, SOFT8, SOFT16, FP32};
 
 template<Metric metricType, ChannelIn inputType>
 class ViterbiCUDA{
 	public:
 
-	using metric_t = std::conditional_t<metricType == Metric::B16, int16_t, int32_t>;
-	using decPack_t = std::conditional_t<metricType == Metric::B16, uint16_t, uint32_t>; // packed decoded bits (16 bits per uint16_t, 32 bits per uint32_t)
+	using metric_t = 	std::conditional_t<metricType == Metric::B16, int16_t, 
+						std::conditional_t<metricType == Metric::B32, int32_t,
+						std::conditional_t<metricType == Metric::FP16, __half, float>>>;
+	using decPack_t = 	std::conditional_t<metricType == Metric::B16, uint16_t, 
+						std::conditional_t<metricType == Metric::B32, uint32_t,
+						std::conditional_t<metricType == Metric::FP16,uint16_t, uint32_t>>>; // packed decoded bits (16 bits per uint16_t, 32 bits per uint32_t)
 	using encPack_t = std::conditional_t<inputType == ChannelIn::FP32, float, int32_t>; // packed encoded input
 	
 	static constexpr int constLen = 7; //constraint length
@@ -20,7 +25,10 @@ class ViterbiCUDA{
 
 	static constexpr int roundup(int a, int b) { if(a <= 0) return 0; else return ((a + b - 1) / b * b); };
 	static constexpr size_t roundup(size_t a, size_t b) { if(a <= 0) return 0; else return ((a + b - 1) / b * b); };
-	static constexpr int bitsPerPack = (metricType == Metric::B32) ? 32 : 16;
+	static constexpr int bitsPerMetric = 	(metricType == Metric::B16) ? 16 : 
+											(metricType == Metric::B32) ? 32 : 11;
+	static constexpr int bitsPerPack = 		(metricType == Metric::B16) ? 16 : 
+											(metricType == Metric::B32) ? 32 : 16;
 	static constexpr int extraL_raw = 32;
 	static constexpr int extraR_raw = 32;
 	static constexpr int slideSize_raw = 32;

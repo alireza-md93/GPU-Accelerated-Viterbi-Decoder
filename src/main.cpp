@@ -25,6 +25,14 @@ int main(int argc, char *argv[]) {
         std::cerr << "Error: 16-bit metric does not support 16-bit soft decision input." << std::endl;
         return -1;
     }
+    if(metricType == Metric::FP16 && inputType == ChannelIn::SOFT16){
+        std::cerr << "Error: fp16 metric does not support 16-bit soft decision input." << std::endl;
+        return -1;
+    }
+    if(metricType == Metric::FP16 && inputType == ChannelIn::SOFT8){
+        std::cerr << "Error: fp16 metric does not support 8-bit soft decision input." << std::endl;
+        return -1;
+    }
 
     if(verbose){
         std::cout << "Message Length: " << messageLen << std::endl;
@@ -86,6 +94,13 @@ void runPipelineWrapper(Metric metricType, ChannelIn inputType, int messageLen, 
         else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::B32, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
         else if(inputType == ChannelIn::FP32)      runPipeline<Metric::B32, ChannelIn::FP32>(messageLen, snr, BENs, showStatus);
     }
+    else if(metricType == Metric::FP16){
+        if(inputType == ChannelIn::HARD)           runPipeline<Metric::FP16, ChannelIn::HARD>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT4)     runPipeline<Metric::FP16, ChannelIn::SOFT4>(messageLen, snr, BENs, showStatus);
+        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT8)     runPipeline<Metric::FP16, ChannelIn::SOFT8>(messageLen, snr, BENs, showStatus);
+        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::FP16, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::FP32)      runPipeline<Metric::FP16, ChannelIn::FP32>(messageLen, snr, BENs, showStatus);
+    }
     else{
         std::cerr << "Unsupported metric type." << std::endl;
     }
@@ -136,6 +151,7 @@ void runPipeline(int messageLen, float snr, int& BENs, bool showStatus){
 		bool genBit = (genBitsVector[i+extraL] == Bit::ON) ? true : false;
         if(decodedBit != genBit){
 			BENs++;
+            // printf("err ind = %d  decPack=0x%08x\n", i, decodedBitsVector[i/bitsPerPack]);
 			// maxInd = i;
 			// if(minInd == -1)
 			// 	minInd = i;
@@ -160,7 +176,7 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
                       << "Options:\n"
                       << "  -n, --num <integer>      Set the message length.\n"
                       << "  -s, --snr <float>        Set the Signal-to-Noise Ratio (SNR).\n"
-                      << "  -m, --metric <type>      Set the metric type (16bit|16 or 32bit|32).\n"
+                      << "  -m, --metric <type>      Set the metric type (b16, b32, f16).\n"
                       << "  -i, --input <type>       Set the input channel type (HARD|h, SOFT4|s4, SOFT8|s8, SOFT16|s16, FP32|f).\n"
                       << "  -v, --verbose            Enable verbose output.\n"
                       << "  -h, --help               Display this help message.\n";
@@ -181,10 +197,12 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
             }
         } else if ((arg == "-m" || arg == "--metric") && i + 1 < argc) {
             std::string metricStr = argv[++i];
-            if (metricStr == "16bit" || metricStr == "16") {
+            if (metricStr == "b16") {
                 metricType = Metric::B16;
-            } else if (metricStr == "32bit" || metricStr == "32") {
+            } else if (metricStr == "b32") {
                 metricType = Metric::B32;
+            } else if (metricStr == "f16") {
+                metricType = Metric::FP16;
             } else {
                 std::cerr << "Error: Invalid metric type for " << arg << "." << std::endl;
                 exit(1);

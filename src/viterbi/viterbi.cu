@@ -164,7 +164,7 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 	bmCalcHelper<inputType> bmHelper;
 	unsigned int allBmInd0, allBmInd1;
 	bmIndCalc(allBmInd0, allBmInd1);
-	int pmNormStride = 1 << (bpp<metricType> - chnWidth<inputType> - 2);
+	int pmNormStride = 1 << (bpm<metricType> - chnWidth<inputType> - 2);
 	/******************************************************************************************/
 
 	bmCalc<metricType, inputType>(0, extraL+extraR, branchMetric, coded, bmHelper);
@@ -180,6 +180,7 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 		for(int i=stage; i<stage+slideSize; i++){	
 			forwardACS<metricType>(i, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
 		}
+		__syncwarp();
 		traceback<metricType>(stage+slideSize-1, slide+slideSize-1, slideSize, data, pathPrev);
 	}
 
@@ -225,12 +226,19 @@ void ViterbiCUDA<metricType, inputType>::run(encPack_t* input_h, decPack_t* outp
 }
 
 template class ViterbiCUDA<Metric::B16, ChannelIn::HARD>;
-template class ViterbiCUDA<Metric::B32, ChannelIn::HARD>;
 template class ViterbiCUDA<Metric::B16, ChannelIn::SOFT4>;
-template class ViterbiCUDA<Metric::B32, ChannelIn::SOFT4>;
 template class ViterbiCUDA<Metric::B16, ChannelIn::SOFT8>;
-template class ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>;
 //--- never to be enabled ---// template class ViterbiCUDA<Metric::B16, ChannelIn::SOFT16>;
-template class ViterbiCUDA<Metric::B32, ChannelIn::SOFT16>;
 template class ViterbiCUDA<Metric::B16, ChannelIn::FP32>;
+
+template class ViterbiCUDA<Metric::B32, ChannelIn::HARD>;
+template class ViterbiCUDA<Metric::B32, ChannelIn::SOFT4>;
+template class ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>;
+template class ViterbiCUDA<Metric::B32, ChannelIn::SOFT16>;
 template class ViterbiCUDA<Metric::B32, ChannelIn::FP32>;
+
+template class ViterbiCUDA<Metric::FP16, ChannelIn::HARD>;
+template class ViterbiCUDA<Metric::FP16, ChannelIn::SOFT4>;
+//--- never to be enabled ---// template class ViterbiCUDA<Metric::FP16, ChannelIn::SOFT8>;
+//--- never to be enabled ---// template class ViterbiCUDA<Metric::FP16, ChannelIn::SOFT16>;
+template class ViterbiCUDA<Metric::FP16, ChannelIn::FP32>;

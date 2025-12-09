@@ -9,6 +9,7 @@ In previous works on GPU-based Viterbi decoding, implementers have often used bl
 ### 1. Optimized Add-Compare-Select (ACS) Pass
 - **Warp-Level Parallelism**: The core ACS butterfly operation is implemented using warp-level shuffling intrinsics (`__shfl_xor_sync`). This eliminates synchronization overhead and avoids slow shared memory access for path metric exchange between threads.
 - **SIMD Intrinsics**: Computational throughput is boosted by leveraging low-level DPX SIMD intrinsics. The implementation uses `int16x2` operations for GPUs with Compute Capability 9.0+ and `int32` for broad compatibility with modern NVIDIA GPUs.
+- **Balanced Compute Pipeline**: Leverages `__half2` metrics to offload path metric calculations to FP16/Tensor Cores, while path selection logic remains on the ALUs. This balances the workload between different computation pipelines, preventing ALU overloading and maximizing throughput.
 
 ### 2. Ultrafast & Memory-Efficient Traceback
 - **Register Exchange Algorithm**: This implementation revives the often-neglected register exchange algorithm. By storing path histories directly in the fast on-chip registers of each thread, it enables an ultrafast traceback that avoids costly memory operations.
@@ -19,8 +20,9 @@ In previous works on GPU-based Viterbi decoding, implementers have often used bl
 ## Core Features
 
 - **Optimized for Multiple GPU Architectures**:
-    - A kernel based on **`int32` DPX intrinsics**, providing high performance on all modern NVIDIA GPUs.
-    - A highly-optimized kernel using **`int16` SIMD intrinsics**, which can nearly double the performance on GPUs with Compute Capability 9.0 or higher (e.g., Ada Lovelace, Hopper).
+    - Kernels based on **`int32` DPX intrinsics**, providing high performance on all modern NVIDIA GPUs.
+    - Highly-optimized kernels using **`int16` SIMD intrinsics**, which can improve performance on GPUs with Compute Capability 9.0 or higher (e.g., Ada Lovelace, Hopper).
+    - Kernels leveraging the `__half2` data type for metrics and `uint16_t` for decisions to balance the computational load across multiple pipelines.
 
 - **Flexible Input Types**: The decoder supports both hard and soft-decision inputs with varying precision levels. For all soft-decision types, a negative value is interpreted as a '0' bit and a positive value as a '1' bit.
   - **Hard Decision**: Input type is `int32`, where each element contains 32 packed encoded bits from the channel.
@@ -52,7 +54,7 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 ./main
 
 # Run with a custom parameters
-./main -n 1000000 -s 5.5 -m 32 -i s4
+./main -n 1000000 -s 5.5 -m b32 -i s4
 ```
 
 **Command-Line Options:**
@@ -67,8 +69,9 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 
 - **`-m, --metric <type>`**  
   Metric type used in the decoder core. Accepted values:  
-  - `16` or `16bit` → 16-bit core  
-  - `32` or `32bit` → 32-bit core (Default)
+  - `b16` → 16-bit core  
+  - `b32` → 32-bit core (Default)
+  - `f16` → FP16 core 
 
 - **`-i, --input <type>`**  
   Channel input type. Accepted values:  
@@ -77,6 +80,9 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   - `SOFT8` or `s8`  
   - `SOFT16` or `s16`  
   - `FP32` or `f`
+
+- **`-v, --verbose`** 
+  Show more details.
 
 - **`-h, --help`**  
   Display the help message.
@@ -91,8 +97,9 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   The `ViterbiCUDA` class is templated as `ViterbiCUDA<Metric, ChannelIn>`.
   
   - **`Metric`**: Defines the data type for branch and path metrics (`metric_t`) and the packed decoded output (`decPack_t`).
-    - **`Metric::B16`**: Uses `uint16_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
-    - **`Metric::B32`**: Uses `uint32_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
+    - **`Metric::B16`**: Uses `int16_t` for `metric_t` and `uint16_t` for `decPack_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
+    - **`Metric::B32`**: Uses `int32_t` for `metric_t` and `uint32_t` for `decPack_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
+    - **`Metric::F16`**: Uses `__half` for `metric_t` and `uint16_t` for `decPack_t`. This uses FP16/Tensor cores for metric calculations.
   
   - **`ChannelIn`**: Defines the input data type from the channel (`encPack_t`). For soft-decision types, negative values are treated as a '0' bit and positive values as a '1' bit.
     - **`ChannelIn::HARD`**: `int32_t` containing 32 packed 1-bit hard-decision values.

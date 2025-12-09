@@ -22,6 +22,7 @@ constexpr int slideSize = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::slideSize;
 constexpr int shmemWidth = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::shMemWidth;
 constexpr int FPprecision = ViterbiCUDA<Metric::B16, ChannelIn::HARD>::FPprecision;
 template<Metric metricType> constexpr int bpp = ViterbiCUDA<metricType, ChannelIn::HARD>::bitsPerPack;
+template<Metric metricType> constexpr int bpm = ViterbiCUDA<metricType, ChannelIn::HARD>::bitsPerMetric;
 template<ChannelIn inputType> constexpr int dpp = ViterbiCUDA<Metric::B16, inputType>::encDataPerPack;
 template<ChannelIn inputType> constexpr int chnWidth = ViterbiCUDA<Metric::B16, inputType>::encDataWidth;
 

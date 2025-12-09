@@ -208,12 +208,19 @@ public:
     }
 };
 template struct ViterbiDecoder<Metric::B16, ChannelIn::HARD>;
-template struct ViterbiDecoder<Metric::B32, ChannelIn::HARD>;
 template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT4>;
-template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT4>;
 template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT8>;
-template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT8>;
 //--- never to be enabled ---// template struct ViterbiDecoder<Metric::B16, ChannelIn::SOFT16>;
-template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT16>;
 template struct ViterbiDecoder<Metric::B16, ChannelIn::FP32>;
+
+template struct ViterbiDecoder<Metric::B32, ChannelIn::HARD>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT4>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT8>;
+template struct ViterbiDecoder<Metric::B32, ChannelIn::SOFT16>;
 template struct ViterbiDecoder<Metric::B32, ChannelIn::FP32>;
+
+template struct ViterbiDecoder<Metric::FP16, ChannelIn::HARD>;
+template struct ViterbiDecoder<Metric::FP16, ChannelIn::SOFT4>;
+//--- never to be enabled ---// template struct ViterbiDecoder<Metric::FP16, ChannelIn::SOFT8>;
+//--- never to be enabled ---// template struct ViterbiDecoder<Metric::FP16, ChannelIn::SOFT16>;
+template struct ViterbiDecoder<Metric::FP16, ChannelIn::FP32>;
