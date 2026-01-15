@@ -88,11 +88,11 @@ size_t ViterbiCUDA<metricType, inputType>::getOutputSize(size_t inputNum)
 
 template<Metric metricType, ChannelIn inputType>
 size_t ViterbiCUDA<metricType, inputType>::getSharedMemSize()
-{return (shmemWidth * 4 * sizeof(metric_t) * blockDimY);}
+{return (bmMemWidth * 4 * sizeof(metric_t) * blockDimY);}
 
 template<Metric metricType, ChannelIn inputType>
 size_t ViterbiCUDA<metricType, inputType>::getPathPrevSize()
-{return (shmemWidth / 8 * (1<<(constLen-1)) * blocksNum_total);}
+{return (forwardLen / 8 * (1<<(constLen-1)) * blocksNum_total);}
 
 template<Metric metricType, ChannelIn inputType>
 void ViterbiCUDA<metricType, inputType>::timerSetup(){
@@ -143,10 +143,10 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 	
 	extern __shared__ int sharedMem[];
 	metric_t<metricType>* sharedMemTip = reinterpret_cast<metric_t<metricType>*>(sharedMem);
-	sharedMemTip += ty * (shmemWidth * 4);
+	sharedMemTip += ty * (bmMemWidth * 4);
 	metric_t<metricType> (*branchMetric)[4] = (metric_t<metricType>(*)[4])sharedMemTip;
 
-	decPack_t<metricType> (*pathPrev) [1<<(CL-1)] = (decPack_t<metricType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((shmemWidth-1)/bpp<metricType>+1);
+	decPack_t<metricType> (*pathPrev) [1<<(CL-1)] = (decPack_t<metricType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((forwardLen-1)/bpp<metricType>+1);
 	
 	size_t packNum = messageLen / bpp<metricType>;
 	size_t decLen = packNum / (gdx * bdy);
@@ -167,18 +167,24 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 	int pmNormStride = 1 << (bpm<metricType> - chnWidth<inputType> - 2);
 	/******************************************************************************************/
 
-	bmCalc<metricType, inputType>(0, extraL+extraR, branchMetric, coded, bmHelper);
-	__syncwarp();
-	for(int stage=0; stage<extraL+extraR; stage++)
-		forwardACS<metricType>(stage, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+	int bmBatchLen = min(extraL + extraR, bmMemWidth);
+	for(int bmBatch=0; bmBatch<extraL+extraR; bmBatch+=bmBatchLen){
+		bmCalc<metricType, inputType>(bmBatch, bmBatchLen, branchMetric, coded, bmHelper);
+		__syncwarp();
+		for(int stage=bmBatch; stage<bmBatch+bmBatchLen; stage++)
+			forwardACS<metricType>(stage, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+	}
 
 	int slide;
+	bmBatchLen = min(slideSize, bmMemWidth);
 	for(slide=0; slide<decLen; slide+=slideSize){
 		int stage = slide + extraL + extraR;
-		bmCalc<metricType, inputType>(stage, slideSize, branchMetric, coded, bmHelper);   
-		__syncwarp();
-		for(int i=stage; i<stage+slideSize; i++){	
-			forwardACS<metricType>(i, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+		for(int bmBatch=stage; bmBatch<stage+slideSize; bmBatch+=bmBatchLen){
+			bmCalc<metricType, inputType>(bmBatch, bmBatchLen, branchMetric, coded, bmHelper);   
+			__syncwarp();
+			for(int i=bmBatch; i<bmBatch+bmBatchLen; i++){	
+				forwardACS<metricType>(i, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+			}
 		}
 		__syncwarp();
 		traceback<metricType>(stage+slideSize-1, slide+slideSize-1, slideSize, data, pathPrev);

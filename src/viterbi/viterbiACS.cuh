@@ -30,12 +30,13 @@ __device__ void forwardACS(int stage, trellis<metricType>& old, trellis<metricTy
 
 template<>
 __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, trellis<Metric::B16>& now, decPack_t<Metric::B16> pathPrev[][1<<(CL-1)], metric_t<Metric::B16> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride){
-	int ind = stage % shmemWidth;
+	int bmInd = stage % bmMemWidth;
+	int ppInd = stage % forwardLen;
 	int stageSE = stage % (CL-1);
 
 	if(stageSE < CL-6){
-		unsigned int bms = (uint16_t)branchMetric[ind][allBmInd0&3];
-		bms = (bms << 16) | (uint16_t)branchMetric[ind][allBmInd0&3];
+		unsigned int bms = (uint16_t)branchMetric[bmInd][allBmInd0&3];
+		bms = (bms << 16) | bms;
 
 		unsigned int pmRev = __funnelshift_l(old.pm, old.pm, 16);
 
@@ -66,8 +67,8 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 		now.pm = __shfl_xor_sync(0xffffffff, now.pm, laneMask);
 		now.pp = __shfl_xor_sync(0xffffffff, now.pp, laneMask);
 		
-		unsigned int bms = (uint16_t)branchMetric[ind][allBmInd0&3];
-		bms = (bms << 16) | (uint16_t)branchMetric[ind][allBmInd1&3];
+		unsigned int bms = (uint16_t)branchMetric[bmInd][allBmInd0&3];
+		bms = (bms << 16) | (uint16_t)branchMetric[bmInd][allBmInd1&3];
 		
 		//------------------------- DPX ---------------------------
 		unsigned int pmMax = __viaddmax_s16x2(old.pm, __vadd2(bms, bms), now.pm);
@@ -121,15 +122,26 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 	allBmInd0 = (allBmInd0 >> 2) | ((allBmInd0&3) << (2*(CL-2)));
 	allBmInd1 = (allBmInd1 >> 2) | ((allBmInd1&3) << (2*(CL-2)));
 
-	if((ind+1) % 16 == 0){
+	// if(bx==0 && ty==0){
+	// 	unsigned int padd = tx % (1<<stageSE);
+	// 	padd <<= (CL-1);
+	// 	unsigned int state0 = padd + tx;
+	// 	unsigned int state1 = state0 + (1U<<(CL-2));
+	// 	state0 >>= stageSE;
+	// 	state1 >>= stageSE;
+	// 	printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state0, (now.pm>>16)&0xffff, (now.pp&(1<<16))?1:0);
+	// 	printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state1, now.pm&0xffff, (now.pp&1)?1:0);
+	// }
+
+	if((ppInd+1) % 16 == 0){
 		unsigned int padd = tx % (1<<stageSE);
 		padd <<= (CL-1);
 		unsigned int state0 = padd + tx;
 		unsigned int state1 = state0 + (1U<<(CL-2));
 		state0 >>= stageSE;
 		state1 >>= stageSE;
-		pathPrev[ind/16][state0] = now.pp >> 16;
-		pathPrev[ind/16][state1] = now.pp  & 0x0000ffff;
+		pathPrev[ppInd/16][state0] = now.pp >> 16;
+		pathPrev[ppInd/16][state1] = now.pp  & 0x0000ffff;
 		old.pp = 0;
 		now.pp = 0;
 	}
@@ -137,11 +149,12 @@ __device__ void forwardACS<Metric::B16>(int stage, trellis<Metric::B16>& old, tr
 
 template<>
 __device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, trellis<Metric::B32>& now, decPack_t<Metric::B32> pathPrev[][1<<(CL-1)], metric_t<Metric::B32> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride){
-	int ind = stage % shmemWidth;
+	int bmInd = stage % bmMemWidth;
+	int ppInd = stage % forwardLen;
 	int stageSE = stage % (CL-1);
 
 	if(stageSE < CL-6){
-		int bm = branchMetric[ind][allBmInd0&3];
+		int bm = branchMetric[bmInd][allBmInd0&3];
 
 		//------------------------- DPX ---------------------------
 		now.pm0 = __viaddmax_s32(old.pm0, bm*2, old.pm1);
@@ -184,8 +197,8 @@ __device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, tr
 		now.pp0 = __shfl_xor_sync(0xffffffff, now.pp0, laneMask);
 		now.pp1 = __shfl_xor_sync(0xffffffff, now.pp1, laneMask);
 		
-		int bm0 = branchMetric[ind][allBmInd0&3];
-		int bm1 = branchMetric[ind][allBmInd1&3];
+		int bm0 = branchMetric[bmInd][allBmInd0&3];
+		int bm1 = branchMetric[bmInd][allBmInd1&3];
 		
 		//------------------------- DPX ---------------------------
 		int pmMax0 = __viaddmax_s32(old.pm0, bm0*2, now.pm0);
@@ -249,15 +262,26 @@ __device__ void forwardACS<Metric::B32>(int stage, trellis<Metric::B32>& old, tr
 	allBmInd0 = (allBmInd0 >> 2) | ((allBmInd0&3) << (2*(CL-2)));
 	allBmInd1 = (allBmInd1 >> 2) | ((allBmInd1&3) << (2*(CL-2)));
 
-	if((ind+1) % 32 == 0){
+	// if(bx==0 && ty==0){
+	// 	unsigned int padd = tx % (1<<stageSE);
+	// 	padd <<= (CL-1);
+	// 	unsigned int state0 = padd + tx;
+	// 	unsigned int state1 = state0 + (1U<<(CL-2));
+	// 	state0 >>= stageSE;
+	// 	state1 >>= stageSE;
+	// 	printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state0, now.pm0, now.pp0&1);
+	// 	printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state1, now.pm1, now.pp1&1);
+	// }
+
+	if((ppInd+1) % 32 == 0){
 		unsigned int padd = tx % (1<<stageSE);
 		padd <<= (CL-1);
 		unsigned int state0 = padd + tx;
 		unsigned int state1 = state0 + (1U<<(CL-2));
 		state0 >>= stageSE;
 		state1 >>= stageSE;
-		pathPrev[ind/32][state0] = now.pp0;
-		pathPrev[ind/32][state1] = now.pp1;
+		pathPrev[ppInd/32][state0] = now.pp0;
+		pathPrev[ppInd/32][state1] = now.pp1;
 		old.pp0 = 0;
 		old.pp1 = 0;
 		now.pp0 = 0;
@@ -287,12 +311,13 @@ struct trellis<Metric::FP16>{
 
 template<>
 __device__ void forwardACS<Metric::FP16>(int stage, trellis<Metric::FP16>& old, trellis<Metric::FP16>& now, decPack_t<Metric::FP16> pathPrev[][1<<(CL-1)], metric_t<Metric::FP16> branchMetric[][4], unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride){
-	int ind = stage % shmemWidth;
+	int bmInd = stage % bmMemWidth;
+	int ppInd = stage % forwardLen;
 	int stageSE = stage % (CL-1);
 	__half pmLimitMax = __half(500);
 
 	if(stageSE < CL-6){
-		__half2 bms = __half2(branchMetric[ind][allBmInd0&3], branchMetric[ind][allBmInd0&3]);
+		__half2 bms = __half2(branchMetric[bmInd][allBmInd0&3], branchMetric[bmInd][allBmInd0&3]);
 
 		half2_uint pmRev;
 		pmRev.ui = __funnelshift_l(old.pm.ui, old.pm.ui, 16);
@@ -314,7 +339,7 @@ __device__ void forwardACS<Metric::FP16>(int stage, trellis<Metric::FP16>& old, 
 		now.pm.ui = __shfl_xor_sync(0xffffffff, now.pm.ui, laneMask);
 		now.pp = __shfl_xor_sync(0xffffffff, now.pp, laneMask);
 		
-		__half2 bms = __half2(branchMetric[ind][allBmInd1&3], branchMetric[ind][allBmInd0&3]);
+		__half2 bms = __half2(branchMetric[bmInd][allBmInd1&3], branchMetric[bmInd][allBmInd0&3]);
 
 		__half2 pm1 = __hadd2(old.pm.fp, bms);
 		__half2 pm2 = __hsub2(now.pm.fp, bms);\
@@ -328,19 +353,6 @@ __device__ void forwardACS<Metric::FP16>(int stage, trellis<Metric::FP16>& old, 
 
 		old = now;
 	}
-
-	// int baseStage = 2079;
-	// int width = 100;
-	// if(bx==20 && ty==0 && stage<baseStage+width && stage>baseStage-width){
-	// 	unsigned int padd = tx % (1<<stageSE);
-	// 	padd <<= (CL-1);
-	// 	unsigned int state0 = padd + tx;
-	// 	unsigned int state1 = state0 + (1U<<(CL-2));
-	// 	state0 >>= stageSE;
-	// 	state1 >>= stageSE;
-	// 	printf("=== stage:%d state:%d pm:%f pp:%x\n", stage-baseStage, state0, static_cast<float>(now.pm.fp.y), ((now.pp&(1<<16))?1:0));
-	// 	printf("=== stage:%d state:%d pm:%f pp:%x\n", stage-baseStage, state1, static_cast<float>(now.pm.fp.x), ((now.pp&1)?1:0));
-	// }
 
 	if(stage % pmNormStride == 0){
 		metric_t<Metric::FP16> pmMin = __hmin(now.pm.fp.x, now.pm.fp.y);
@@ -366,15 +378,26 @@ __device__ void forwardACS<Metric::FP16>(int stage, trellis<Metric::FP16>& old, 
 	allBmInd0 = (allBmInd0 >> 2) | ((allBmInd0&3) << (2*(CL-2)));
 	allBmInd1 = (allBmInd1 >> 2) | ((allBmInd1&3) << (2*(CL-2)));
 
-	if((ind+1) % 16 == 0){
+	// if(bx==20 && ty==0){
+	// 	unsigned int padd = tx % (1<<stageSE);
+	// 	padd <<= (CL-1);
+	// 	unsigned int state0 = padd + tx;
+	// 	unsigned int state1 = state0 + (1U<<(CL-2));
+	// 	state0 >>= stageSE;
+	// 	state1 >>= stageSE;
+	// 	printf("=== stage:%d state:%d pm:%f pp:%x\n", stage-baseStage, state0, static_cast<float>(now.pm.fp.y), ((now.pp&(1<<16))?1:0));
+	// 	printf("=== stage:%d state:%d pm:%f pp:%x\n", stage-baseStage, state1, static_cast<float>(now.pm.fp.x), ((now.pp&1)?1:0));
+	// }
+
+	if((ppInd+1) % 16 == 0){
 		unsigned int padd = tx % (1<<stageSE);
 		padd <<= (CL-1);
 		unsigned int state0 = padd + tx;
 		unsigned int state1 = state0 + (1U<<(CL-2));
 		state0 >>= stageSE;
 		state1 >>= stageSE;
-		pathPrev[ind/16][state0] = now.pp >> 16;
-		pathPrev[ind/16][state1] = now.pp  & 0x0000ffff;
+		pathPrev[ppInd/16][state0] = now.pp >> 16;
+		pathPrev[ppInd/16][state1] = now.pp  & 0x0000ffff;
 		old.pp = 0;
 		now.pp = 0;
 	}

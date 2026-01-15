@@ -35,7 +35,8 @@ class ViterbiCUDA{
 	static constexpr int extraL = roundup(extraL_raw, bitsPerPack) - (constLen - 1);
 	static constexpr int extraR = roundup(extraR_raw, bitsPerPack) + (constLen - 1);
 	static constexpr int slideSize = roundup(slideSize_raw, bitsPerPack);
-	static constexpr int shMemWidth = extraL + slideSize + extraR;
+	static constexpr int forwardLen = extraL + slideSize + extraR;
+	static constexpr int bmMemWidth = 32;//32/4;
     static constexpr int blockDimY = 2;
     static constexpr int FPprecision = 4;
 	static constexpr int encDataPerPack = (inputType == ChannelIn::HARD) ? (sizeof(encPack_t) * 8) :

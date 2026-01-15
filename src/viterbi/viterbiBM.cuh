@@ -7,8 +7,8 @@
 template<ChannelIn inputType>
 struct bmCalcHelper;
 
-template<Metric metricType, ChannelIn inputType>
-__device__ void bmCalc(int stage, int num, metric_t<metricType> branchMetric[][4], encPack_t<inputType>* coded, bmCalcHelper<inputType>& helper){}
+template<ChannelIn inputType>
+__device__ int bmCalcInt(int i, encPack_t<inputType>* coded, bmCalcHelper<inputType>& helper){}
 
 //============================= HARD ============================
 
@@ -31,34 +31,14 @@ struct bmCalcHelper<ChannelIn::HARD>{
 };
 
 template<>
-__device__ void bmCalc<Metric::B16, ChannelIn::HARD>
-(int stage, int num, metric_t<Metric::B16> branchMetric[][4], encPack_t<ChannelIn::HARD>* coded, bmCalcHelper<ChannelIn::HARD>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>1)){
-		uint32_t data = coded[i>>4];
-		branchMetric[i%shmemWidth][helper.bmInd] = 1 - static_cast<metric_t<Metric::B16>>(__popc((data&helper.mask0) ^ helper.out0));
-		branchMetric[(i+(bdx>>2))%shmemWidth][helper.bmInd] = 1 - static_cast<metric_t<Metric::B16>>(__popc((data&helper.mask1) ^ helper.out1));
-	}
+__device__ int bmCalcInt<ChannelIn::HARD>(int i, encPack_t<ChannelIn::HARD>* coded, bmCalcHelper<ChannelIn::HARD>& helper){
+	uint32_t mask, out;
+	uint32_t data = coded[i>>4];
+	mask = i%16 < 8 ? helper.mask0 : helper.mask1;
+	out = i%16 < 8 ? helper.out0 : helper.out1;
+	return (1 - __popc((data&mask) ^ out));
 }
 
-template<>
-__device__ void bmCalc<Metric::B32, ChannelIn::HARD>
-(int stage, int num, metric_t<Metric::B32> branchMetric[][4], encPack_t<ChannelIn::HARD>* coded, bmCalcHelper<ChannelIn::HARD>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>1)){
-		uint32_t data = coded[i>>4];
-		branchMetric[i%shmemWidth][helper.bmInd] = 1 - __popc((data&helper.mask0) ^ helper.out0);
-		branchMetric[(i+(bdx>>2))%shmemWidth][helper.bmInd] = 1 - __popc((data&helper.mask1) ^ helper.out1);
-	}
-}
-
-template<>
-__device__ void bmCalc<Metric::FP16, ChannelIn::HARD>
-(int stage, int num, metric_t<Metric::FP16> branchMetric[][4], encPack_t<ChannelIn::HARD>* coded, bmCalcHelper<ChannelIn::HARD>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>1)){
-		uint32_t data = coded[i>>4];
-		branchMetric[i%shmemWidth][helper.bmInd] = __half(1 - __popc((data&helper.mask0) ^ helper.out0));
-		branchMetric[(i+(bdx>>2))%shmemWidth][helper.bmInd] = __half(1 - __popc((data&helper.mask1) ^ helper.out1));
-	}
-}
 
 //============================= SOFT4 ============================
 
@@ -82,54 +62,16 @@ struct bmCalcHelper<ChannelIn::SOFT4>{
 };
 
 template<>
-__device__ void bmCalc<Metric::B16, ChannelIn::SOFT4>
-(int stage, int num, metric_t<Metric::B16> branchMetric[][4], encPack_t<ChannelIn::SOFT4>* coded, bmCalcHelper<ChannelIn::SOFT4>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
-		uint32_t data_raw = static_cast<uint32_t>(coded[i/4]);
-		uint32_t mask0 = 0x000000f0 << (24-helper.shift);
-		uint32_t mask1 = 0x0000000f << (24-helper.shift);
-		uint32_t data0 = (data_raw & mask0) << (helper.shift);
-		uint32_t data1 = (data_raw & mask1) << (helper.shift+4);
-		int32_t data0shifted = static_cast<int32_t>(data0) >> 12;
-		int32_t data1shifted = static_cast<int32_t>(data1) >> 28;
-		int32_t data = (data0shifted&0xffff0000) | (data1shifted&0x0000ffff);
-
-		branchMetric[i%shmemWidth][helper.bmInd] = static_cast<metric_t<Metric::B16>>(__dp2a_lo(data, helper.coeff, 0));
-	}
-}
-
-template<>
-__device__ void bmCalc<Metric::B32, ChannelIn::SOFT4>
-(int stage, int num, metric_t<Metric::B32> branchMetric[][4], encPack_t<ChannelIn::SOFT4>* coded, bmCalcHelper<ChannelIn::SOFT4>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
-		uint32_t data_raw = static_cast<uint32_t>(coded[i/4]);
-		uint32_t mask0 = 0x000000f0 << (24-helper.shift);
-		uint32_t mask1 = 0x0000000f << (24-helper.shift);
-		uint32_t data0 = (data_raw & mask0) << (helper.shift);
-		uint32_t data1 = (data_raw & mask1) << (helper.shift+4);
-		int32_t data0shifted = static_cast<int32_t>(data0) >> 12;
-		int32_t data1shifted = static_cast<int32_t>(data1) >> 28;
-		int32_t data = (data0shifted&0xffff0000) | (data1shifted&0x0000ffff);
-
-		branchMetric[i%shmemWidth][helper.bmInd] = __dp2a_lo(data, helper.coeff, 0);
-	}
-}
-
-template<>
-__device__ void bmCalc<Metric::FP16, ChannelIn::SOFT4>
-(int stage, int num, metric_t<Metric::FP16> branchMetric[][4], encPack_t<ChannelIn::SOFT4>* coded, bmCalcHelper<ChannelIn::SOFT4>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
-		uint32_t data_raw = static_cast<uint32_t>(coded[i/4]);
-		uint32_t mask0 = 0x000000f0 << (24-helper.shift);
-		uint32_t mask1 = 0x0000000f << (24-helper.shift);
-		uint32_t data0 = (data_raw & mask0) << (helper.shift);
-		uint32_t data1 = (data_raw & mask1) << (helper.shift+4);
-		int32_t data0shifted = static_cast<int32_t>(data0) >> 12;
-		int32_t data1shifted = static_cast<int32_t>(data1) >> 28;
-		int32_t data = (data0shifted&0xffff0000) | (data1shifted&0x0000ffff);
-
-		branchMetric[i%shmemWidth][helper.bmInd] = __half(__dp2a_lo(data, helper.coeff, 0));
-	}
+__device__ int bmCalcInt<ChannelIn::SOFT4>(int i, encPack_t<ChannelIn::SOFT4>* coded, bmCalcHelper<ChannelIn::SOFT4>& helper){
+	uint32_t data_raw = static_cast<uint32_t>(coded[i/4]);
+	uint32_t mask0 = 0x000000f0 << (24-helper.shift);
+	uint32_t mask1 = 0x0000000f << (24-helper.shift);
+	uint32_t data0 = (data_raw & mask0) << (helper.shift);
+	uint32_t data1 = (data_raw & mask1) << (helper.shift+4);
+	int32_t data0shifted = static_cast<int32_t>(data0) >> 12;
+	int32_t data1shifted = static_cast<int32_t>(data1) >> 28;
+	int32_t data = (data0shifted&0xffff0000) | (data1shifted&0x0000ffff);
+	return (__dp2a_lo(data, helper.coeff, 0));
 }
 
 //============================= SOFT8 ============================
@@ -153,24 +95,8 @@ struct bmCalcHelper<ChannelIn::SOFT8>{
 };
 
 template<>
-__device__ void bmCalc<Metric::B16, ChannelIn::SOFT8>
-(int stage, int num, metric_t<Metric::B16> branchMetric[][4], encPack_t<ChannelIn::SOFT8>* coded, bmCalcHelper<ChannelIn::SOFT8>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2))
-		branchMetric[i%shmemWidth][helper.bmInd] = static_cast<metric_t<Metric::B16>>(__dp4a(coded[i/2], helper.coeff, 0));
-}
-
-template<>
-__device__ void bmCalc<Metric::B32, ChannelIn::SOFT8>
-(int stage, int num, metric_t<Metric::B32> branchMetric[][4], encPack_t<ChannelIn::SOFT8>* coded, bmCalcHelper<ChannelIn::SOFT8>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2))
-		branchMetric[i%shmemWidth][helper.bmInd] = __dp4a(coded[i/2], helper.coeff, 0);
-}
-
-template<>
-__device__ void bmCalc<Metric::FP16, ChannelIn::SOFT8>
-(int stage, int num, metric_t<Metric::FP16> branchMetric[][4], encPack_t<ChannelIn::SOFT8>* coded, bmCalcHelper<ChannelIn::SOFT8>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2))
-		branchMetric[i%shmemWidth][helper.bmInd] = __half(__dp4a(coded[i/2], helper.coeff, 0));
+__device__ int bmCalcInt<ChannelIn::SOFT8>(int i, encPack_t<ChannelIn::SOFT8>* coded, bmCalcHelper<ChannelIn::SOFT8>& helper){
+	return __dp4a(coded[i/2], helper.coeff, 0);
 }
 
 //============================= SOFT16 ============================
@@ -193,24 +119,8 @@ struct bmCalcHelper<ChannelIn::SOFT16>{
 };
 
 template<>
-__device__ void bmCalc<Metric::B16, ChannelIn::SOFT16>
-(int stage, int num, metric_t<Metric::B16> branchMetric[][4], encPack_t<ChannelIn::SOFT16>* coded, bmCalcHelper<ChannelIn::SOFT16>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2))
-		branchMetric[i%shmemWidth][helper.bmInd] = static_cast<metric_t<Metric::B16>>(__dp2a_lo(coded[i], helper.coeff, 0));
-}
-
-template<>
-__device__ void bmCalc<Metric::B32, ChannelIn::SOFT16>
-(int stage, int num, metric_t<Metric::B32> branchMetric[][4], encPack_t<ChannelIn::SOFT16>* coded, bmCalcHelper<ChannelIn::SOFT16>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2))
-		branchMetric[i%shmemWidth][helper.bmInd] = __dp2a_lo(coded[i], helper.coeff, 0); 
-}
-
-template<>
-__device__ void bmCalc<Metric::FP16, ChannelIn::SOFT16>
-(int stage, int num, metric_t<Metric::FP16> branchMetric[][4], encPack_t<ChannelIn::SOFT16>* coded, bmCalcHelper<ChannelIn::SOFT16>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2))
-		branchMetric[i%shmemWidth][helper.bmInd] = __half(__dp2a_lo(coded[i], helper.coeff, 0));
+__device__ int bmCalcInt<ChannelIn::SOFT16>(int i, encPack_t<ChannelIn::SOFT16>* coded, bmCalcHelper<ChannelIn::SOFT16>& helper){
+	return __dp2a_lo(coded[i], helper.coeff, 0);
 }
 
 //============================= FP32 ============================
@@ -234,40 +144,43 @@ struct bmCalcHelper<ChannelIn::FP32>{
 };
 
 template<>
-__device__ void bmCalc<Metric::B16, ChannelIn::FP32>
-(int stage, int num, metric_t<Metric::B16> branchMetric[][4], encPack_t<ChannelIn::FP32>* coded, bmCalcHelper<ChannelIn::FP32>& helper){
+__device__ int bmCalcInt<ChannelIn::FP32>(int i, encPack_t<ChannelIn::FP32>* coded, bmCalcHelper<ChannelIn::FP32>& helper){
+	encPack_t<ChannelIn::FP32> bit0 = coded[2*i];
+	encPack_t<ChannelIn::FP32> bit1 = coded[2*i+1];
+	bit0 = fminf(fmaxf(bit0, helper.minVal), helper.maxVal);
+	bit1 = fminf(fmaxf(bit1, helper.minVal), helper.maxVal);
+	return static_cast<int>((helper.coeff0 * bit0) + (helper.coeff1 * bit1));
+}
 
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
-		encPack_t<ChannelIn::FP32> bit0 = coded[2*i];
-		encPack_t<ChannelIn::FP32> bit1 = coded[2*i+1];
-		bit0 = fminf(fmaxf(bit0, helper.minVal), helper.maxVal);
-		bit1 = fminf(fmaxf(bit1, helper.minVal), helper.maxVal);
-		branchMetric[i%shmemWidth][helper.bmInd] = static_cast<metric_t<Metric::B16>>((helper.coeff0 * bit0) + (helper.coeff1 * bit1));
-	}
+//============================= BM Calculator ============================
+
+template<Metric metricType>
+__device__ metric_t<metricType> intToBM(int val){
+	return val;
 }
 
 template<>
-__device__ void bmCalc<Metric::B32, ChannelIn::FP32>
-(int stage, int num, metric_t<Metric::B32> branchMetric[][4], encPack_t<ChannelIn::FP32>* coded, bmCalcHelper<ChannelIn::FP32>& helper){
-	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
-		encPack_t<ChannelIn::FP32> bit0 = coded[2*i];
-		encPack_t<ChannelIn::FP32> bit1 = coded[2*i+1];
-		bit0 = fminf(fmaxf(bit0, helper.minVal), helper.maxVal);
-		bit1 = fminf(fmaxf(bit1, helper.minVal), helper.maxVal);
-		branchMetric[i%shmemWidth][helper.bmInd] = static_cast<metric_t<Metric::B32>>((helper.coeff0 * bit0) + (helper.coeff1 * bit1)); 
-	}
+__device__ metric_t<Metric::B16> intToBM<Metric::B16>(int val){
+	return static_cast<metric_t<Metric::B16>>(val);
 }
 
 template<>
-__device__ void bmCalc<Metric::FP16, ChannelIn::FP32>
-(int stage, int num, metric_t<Metric::FP16> branchMetric[][4], encPack_t<ChannelIn::FP32>* coded, bmCalcHelper<ChannelIn::FP32>& helper){
+__device__ metric_t<Metric::B32> intToBM<Metric::B32>(int val){
+	return static_cast<metric_t<Metric::B32>>(val);
+}
 
+template<>
+__device__ metric_t<Metric::FP16> intToBM<Metric::FP16>(int val){
+	return __half(val);
+}
+
+
+template<Metric metricType, ChannelIn inputType>
+__device__ void bmCalc(int stage, int num, metric_t<metricType> branchMetric[][4], encPack_t<inputType>* coded, bmCalcHelper<inputType>& helper){
 	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
-		encPack_t<ChannelIn::FP32> bit0 = coded[2*i];
-		encPack_t<ChannelIn::FP32> bit1 = coded[2*i+1];
-		bit0 = fminf(fmaxf(bit0, helper.minVal), helper.maxVal);
-		bit1 = fminf(fmaxf(bit1, helper.minVal), helper.maxVal);
-		branchMetric[i%shmemWidth][helper.bmInd] = __half((helper.coeff0 * bit0) + (helper.coeff1 * bit1));
+		branchMetric[i%bmMemWidth][helper.bmInd] = intToBM<metricType>(bmCalcInt<inputType>(i, coded, helper));
+		// if(bx==0 && ty==0)
+		// 	printf("=== stage:%d ind:%d bm:%d\n", i, helper.bmInd, branchMetric[i%bmMemWidth][helper.bmInd]);	
 	}
 }
 
