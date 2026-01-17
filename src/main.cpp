@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     if(verbose){
         std::cout << "Message Length: " << messageLen << std::endl;
         std::cout << "SNR: " << snr << " dB" <<  std::endl;
-        std::cout << "Metric Type: " << ((metricType == Metric::B16) ? "16-bit" : "32-bit") << std::endl;
+        std::cout << "Metric Type: " << ((metricType == Metric::B16) ? "16-bit" : ((metricType == Metric::B32) ? "32-bit" : "FP16")) << std::endl;
         std::cout << "Input Channel Type: ";
         switch(inputType){
             case ChannelIn::HARD:

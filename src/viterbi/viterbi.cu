@@ -160,7 +160,8 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 	coded += startInd*2/dpp<inputType>;
 	
 	/****************************** calculate trellis parameters ******************************/	 
-	trellis<metricType> old, now;
+	trellisPM<metricType> oldPM, nowPM;
+	trellisPP<metricType> oldPP, nowPP;
 	bmCalcHelper<inputType> bmHelper;
 	unsigned int allBmInd0, allBmInd1;
 	bmIndCalc(allBmInd0, allBmInd1);
@@ -172,7 +173,7 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 		bmCalc<metricType, inputType>(bmBatch, bmBatchLen, branchMetric, coded, bmHelper);
 		__syncwarp();
 		for(int stage=bmBatch; stage<bmBatch+bmBatchLen; stage++)
-			forwardACS<metricType>(stage, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+			forwardACS<metricType>(stage, oldPM, oldPP, nowPM, nowPP, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
 	}
 
 	int slide;
@@ -183,7 +184,7 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 			bmCalc<metricType, inputType>(bmBatch, bmBatchLen, branchMetric, coded, bmHelper);   
 			__syncwarp();
 			for(int i=bmBatch; i<bmBatch+bmBatchLen; i++){	
-				forwardACS<metricType>(i, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+				forwardACS<metricType>(i, oldPM, oldPP, nowPM, nowPP, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
 			}
 		}
 		__syncwarp();
@@ -195,7 +196,7 @@ __global__ void viterbi_core(decPack_t<metricType>* data, encPack_t<inputType>* 
 	bmCalc<metricType, inputType>(stage, remSlideSize, branchMetric, coded, bmHelper);   
 	__syncwarp();
 	for(int i=stage; i<stage+remSlideSize; i++){	
-		forwardACS<metricType>(i, old, now, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+		forwardACS<metricType>(i, oldPM, oldPP, nowPM, nowPP, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
 	}
 	traceback<metricType>(stage+remSlideSize-1, slide+remSlideSize-1, remSlideSize, data, pathPrev);
 }

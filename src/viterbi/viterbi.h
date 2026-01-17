@@ -5,6 +5,7 @@
 #include <cuda_fp16.h>
 
 enum Metric {B16, B32, FP16};
+enum CompMode{DPX, REG};
 enum ChannelIn {HARD, SOFT4, SOFT8, SOFT16, FP32};
 
 template<Metric metricType, ChannelIn inputType>
