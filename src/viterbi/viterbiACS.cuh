@@ -8,32 +8,32 @@
 template<Metric metricType>
 struct trellisPM{};
 
-template<Metric metricType>
+template<DecodeOut outputType>
 struct trellisPP{};
 
 //two packed 16-bit values
 template<>
-struct trellisPM<Metric::B16>{
+struct trellisPM<Metric::M_B16>{
 	unsigned int val;
 
 	__device__ trellisPM(): val(0) {}
 };
 template<>
-struct trellisPP<Metric::B16>{
+struct trellisPP<DecodeOut::O_B16>{
 	unsigned int val;
 
 	__device__ trellisPP(): val(0) {}
 };
 
 template<>
-struct trellisPM<Metric::B32>{
+struct trellisPM<Metric::M_B32>{
 	int v0;
 	int v1;
 
 	__device__ trellisPM(): v0(0), v1(0) {}
 };
 template<>
-struct trellisPP<Metric::B32>{
+struct trellisPP<DecodeOut::O_B32>{
 	unsigned int v0;
 	unsigned int v1;
 
@@ -45,68 +45,61 @@ union half2_uint{
 	unsigned int ui;
 };
 template<>
-struct trellisPM<Metric::FP16>{
+struct trellisPM<Metric::M_FP16>{
 	half2_uint val;
 
 	__device__ trellisPM() {
 		val.fp = __half2(__float2half(0.0f), __float2half(0.0f));
 	}
 
-	__device__ trellisPM<Metric::FP16>& operator=(const trellisPM<Metric::FP16>& other){
+	__device__ trellisPM<Metric::M_FP16>& operator=(const trellisPM<Metric::M_FP16>& other){
 		this->val.ui = other.val.ui;
-		return *this;
-	}
-};
-template<>
-struct trellisPP<Metric::FP16>{
-	unsigned int val;
-
-	__device__ trellisPP(): val(0){}
-
-	__device__ trellisPP<Metric::FP16>& operator=(const trellisPP<Metric::FP16>& other){
-		this->val = other.val;
 		return *this;
 	}
 };
 
 //----------------------------------------------------------------
 
-template<Metric metricType, CompMode compMode=CompMode::REG>
+enum CondMode{MASK, BOOL};
+
+template<CondMode condMode>
 struct condACS{};
 
 template<>
-struct condACS<Metric::B16, CompMode::DPX>
+struct condACS<CondMode::MASK>
 {
 	unsigned int val;
 };
 
 template<>
-struct condACS<Metric::B16, CompMode::REG>
-{
-	bool H;
-	bool L;
-};
-
-template<CompMode compMode>
-struct condACS<Metric::B32, compMode>
+struct condACS<CondMode::BOOL>
 {
 	bool v0;
 	bool v1;
 };
 
-template<>
-struct condACS<Metric::FP16, CompMode::REG>
-{
-	unsigned int val;
+
+template<Metric metricType, CompMode compMode>
+struct condModeEval{
+	constexpr static CondMode value = 
+		(metricType == Metric::M_B16 && compMode == CompMode::REG) ? CondMode::BOOL :
+		(metricType == Metric::M_B16 && compMode == CompMode::DPX) ? CondMode::MASK :
+		(metricType == Metric::M_B32) ? CondMode::BOOL :
+		(metricType == Metric::M_FP16) ? CondMode::MASK :
+		CondMode::BOOL; //default
+};
+template<Metric metricType, CompMode compMode>
+struct condType{
+	using type = condACS<condModeEval<metricType, compMode>::value>;
 };
 
 //============================================= PM update in self-paired mode =============================================
 
 template<Metric metricType, CompMode compMode=CompMode::REG>
-__device__ void selfPM(trellisPM<metricType>& old, trellisPM<metricType>& now, condACS<metricType, compMode>& cond, metric_t<metricType> branchMetric[4], unsigned int& allBmInd0){}
+__device__ void selfPM(trellisPM<metricType>& old, trellisPM<metricType>& now, typename condType<metricType, compMode>::type& cond, metric_t<metricType> branchMetric[4], unsigned int& allBmInd0){}
 
 template<>
-__device__ void selfPM<Metric::B16, CompMode::DPX>(trellisPM<Metric::B16>& old, trellisPM<Metric::B16>& now, condACS<Metric::B16, CompMode::DPX>& cond, metric_t<Metric::B16> branchMetric[4], unsigned int& allBmInd0){
+__device__ void selfPM<Metric::M_B16, CompMode::DPX>(trellisPM<Metric::M_B16>& old, trellisPM<Metric::M_B16>& now, typename condType<Metric::M_B16, CompMode::DPX>::type& cond, metric_t<Metric::M_B16> branchMetric[4], unsigned int& allBmInd0){
 	unsigned int bms = (uint16_t)branchMetric[allBmInd0&3];
 	bms = (bms << 16) | bms;
 
@@ -117,17 +110,17 @@ __device__ void selfPM<Metric::B16, CompMode::DPX>(trellisPM<Metric::B16>& old, 
 }
 
 template<>
-__device__ void selfPM<Metric::B16, CompMode::REG>(trellisPM<Metric::B16>& old, trellisPM<Metric::B16>& now, condACS<Metric::B16, CompMode::REG>& cond, metric_t<Metric::B16> branchMetric[4], unsigned int& allBmInd0){
+__device__ void selfPM<Metric::M_B16, CompMode::REG>(trellisPM<Metric::M_B16>& old, trellisPM<Metric::M_B16>& now, typename condType<Metric::M_B16, CompMode::REG>::type& cond, metric_t<Metric::M_B16> branchMetric[4], unsigned int& allBmInd0){
 	unsigned int bms = (uint16_t)branchMetric[allBmInd0&3];
 	bms = (bms << 16) | bms;
 	unsigned int pmRev = __funnelshift_l(old.val, old.val, 16);
-	now.val = __vibmax_s16x2(__vadd2(old.val, bms), __vadd2(pmRev, __vneg2(bms)), &cond.H, &cond.L);
+	now.val = __vibmax_s16x2(__vadd2(old.val, bms), __vadd2(pmRev, __vneg2(bms)), &cond.v0, &cond.v1);
 }
 
 //----------------------------------------------------------------
 
 template<>
-__device__ void selfPM<Metric::B32, CompMode::DPX>(trellisPM<Metric::B32>& old, trellisPM<Metric::B32>& now, condACS<Metric::B32, CompMode::DPX>& cond, metric_t<Metric::B32> branchMetric[4], unsigned int& allBmInd0){
+__device__ void selfPM<Metric::M_B32, CompMode::DPX>(trellisPM<Metric::M_B32>& old, trellisPM<Metric::M_B32>& now, typename condType<Metric::M_B32, CompMode::DPX>::type& cond, metric_t<Metric::M_B32> branchMetric[4], unsigned int& allBmInd0){
 	int bm = branchMetric[allBmInd0&3];
 
 	now.v0 = __viaddmax_s32(old.v0, bm*2, old.v1);
@@ -140,7 +133,7 @@ __device__ void selfPM<Metric::B32, CompMode::DPX>(trellisPM<Metric::B32>& old, 
 }
 
 template<>
-__device__ void selfPM<Metric::B32, CompMode::REG>(trellisPM<Metric::B32>& old, trellisPM<Metric::B32>& now, condACS<Metric::B32, CompMode::REG>& cond, metric_t<Metric::B32> branchMetric[4], unsigned int& allBmInd0){
+__device__ void selfPM<Metric::M_B32, CompMode::REG>(trellisPM<Metric::M_B32>& old, trellisPM<Metric::M_B32>& now, typename condType<Metric::M_B32, CompMode::REG>::type& cond, metric_t<Metric::M_B32> branchMetric[4], unsigned int& allBmInd0){
 	int bm = branchMetric[allBmInd0&3];
 
 	now.v0 = __vibmax_s32(old.v1-bm, old.v0+bm, &cond.v0);
@@ -150,7 +143,7 @@ __device__ void selfPM<Metric::B32, CompMode::REG>(trellisPM<Metric::B32>& old, 
 //----------------------------------------------------------------
 
 template<>
-__device__ void selfPM<Metric::FP16, CompMode::REG>(trellisPM<Metric::FP16>& old, trellisPM<Metric::FP16>& now, condACS<Metric::FP16>& cond, metric_t<Metric::FP16> branchMetric[4], unsigned int& allBmInd0){
+__device__ void selfPM<Metric::M_FP16, CompMode::REG>(trellisPM<Metric::M_FP16>& old, trellisPM<Metric::M_FP16>& now, typename condType<Metric::M_FP16, CompMode::REG>::type& cond, metric_t<Metric::M_FP16> branchMetric[4], unsigned int& allBmInd0){
 	__half2 bms = __half2(branchMetric[allBmInd0&3], branchMetric[allBmInd0&3]);
 
 	half2_uint pmRev;
@@ -164,11 +157,11 @@ __device__ void selfPM<Metric::FP16, CompMode::REG>(trellisPM<Metric::FP16>& old
 
 //============================================= PP update in self-paired mode =============================================
 
-template<Metric metricType, CompMode compMode=CompMode::REG>
-__device__ void selfPP(trellisPP<metricType>& old, trellisPP<metricType>& now, condACS<metricType, compMode>& cond){}
+template<DecodeOut outputType, CondMode condMode>
+__device__ void selfPP(trellisPP<outputType>& old, trellisPP<outputType>& now, condACS<condMode>& cond){}
 
 template<>
-__device__ void selfPP<Metric::B16, CompMode::DPX>(trellisPP<Metric::B16>& old, trellisPP<Metric::B16>& now, condACS<Metric::B16, CompMode::DPX>& cond){
+__device__ void selfPP<DecodeOut::O_B16, CondMode::MASK>(trellisPP<DecodeOut::O_B16>& old, trellisPP<DecodeOut::O_B16>& now, condACS<CondMode::MASK>& cond){
 	unsigned int permMap = (((cond.val>>8) & 0x00002222) ^ 0x00002200) | 0x00001010;
 	now.val = __byte_perm(old.val, 0, permMap);
 	cond.val &= 0x00010001;
@@ -177,51 +170,31 @@ __device__ void selfPP<Metric::B16, CompMode::DPX>(trellisPP<Metric::B16>& old, 
 }
 
 template<>
-__device__ void selfPP<Metric::B16, CompMode::REG>(trellisPP<Metric::B16>& old, trellisPP<Metric::B16>& now, condACS<Metric::B16, CompMode::REG>& cond){
-	unsigned int permMap = (cond.H?0x00002200U:0U) | (cond.L?0U:0x00000022U) | 0x00001010;
+__device__ void selfPP<DecodeOut::O_B16, CondMode::BOOL>(trellisPP<DecodeOut::O_B16>& old, trellisPP<DecodeOut::O_B16>& now, condACS<CondMode::BOOL>& cond){
+	unsigned int permMap = (cond.v0?0x00002200U:0U) | (cond.v1?0U:0x00000022U) | 0x00001010;
 	now.val = __byte_perm(old.val, 0, permMap);
-	unsigned int padd = (cond.H?0U:0x00010000U) | (cond.L?0x00000001U:0U);
+	unsigned int padd = (cond.v0?0U:0x00010000U) | (cond.v1?0x00000001U:0U);
 	now.val = (now.val << 1) | padd; 
 }
 
 //----------------------------------------------------------------
 
 template<>
-__device__ void selfPP<Metric::B32, CompMode::DPX>(trellisPP<Metric::B32>& old, trellisPP<Metric::B32>& now, condACS<Metric::B32, CompMode::DPX>& cond){
+__device__ void selfPP<DecodeOut::O_B32, CondMode::BOOL>(trellisPP<DecodeOut::O_B32>& old, trellisPP<DecodeOut::O_B32>& now, condACS<CondMode::BOOL>& cond){
 	now.v0 = cond.v0 ? old.v1 : old.v0;
 	now.v0 = (now.v0 << 1) | cond.v0;
 	
 	now.v1 = cond.v1 ? old.v1 : old.v0;
 	now.v1 = (now.v1 << 1) | cond.v1;
-}
-
-template<>
-__device__ void selfPP<Metric::B32, CompMode::REG>(trellisPP<Metric::B32>& old, trellisPP<Metric::B32>& now, condACS<Metric::B32, CompMode::REG>& cond){
-	now.v0 = cond.v0 ? old.v1 : old.v0;
-	now.v0 = (now.v0 << 1) | cond.v0;
-	
-	now.v1 = cond.v1 ? old.v1 : old.v0;
-	now.v1 = (now.v1 << 1) | cond.v1;
-}
-
-//----------------------------------------------------------------
-
-template<>
-__device__ void selfPP<Metric::FP16, CompMode::REG>(trellisPP<Metric::FP16>& old, trellisPP<Metric::FP16>& now, condACS<Metric::FP16>& cond){
-	unsigned int permMap = (((cond.val>>8) & 0x00002222) ^ 0x00002200) | 0x00001010;
-	now.val = __byte_perm(old.val, 0, permMap);
-	cond.val &= 0x00010001;
-	cond.val ^= 1;
-	now.val = (now.val << 1) | cond.val;
 }
 
 //============================================= PM update in SE mode =============================================
 
 template<Metric metricType, CompMode compMode=CompMode::REG>
-__device__ void pairPM(trellisPM<metricType>& old, trellisPM<metricType>& now, condACS<metricType, compMode>& cond, metric_t<metricType> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){}
+__device__ void pairPM(trellisPM<metricType>& old, trellisPM<metricType>& now, typename condType<metricType, compMode>::type& cond, metric_t<metricType> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){}
 
 template<>
-__device__ void pairPM<Metric::B16, CompMode::DPX>(trellisPM<Metric::B16>& old, trellisPM<Metric::B16>& now, condACS<Metric::B16, CompMode::DPX>& cond, metric_t<Metric::B16> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void pairPM<Metric::M_B16, CompMode::DPX>(trellisPM<Metric::M_B16>& old, trellisPM<Metric::M_B16>& now, typename condType<Metric::M_B16, CompMode::DPX>::type& cond, metric_t<Metric::M_B16> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	unsigned int bms = (uint16_t)branchMetric[allBmInd0&3];
 	bms = (bms << 16) | (uint16_t)branchMetric[allBmInd1&3];
 	
@@ -231,16 +204,16 @@ __device__ void pairPM<Metric::B16, CompMode::DPX>(trellisPM<Metric::B16>& old, 
 }
 	
 template<>
-__device__ void pairPM<Metric::B16, CompMode::REG>(trellisPM<Metric::B16>& old, trellisPM<Metric::B16>& now, condACS<Metric::B16, CompMode::REG>& cond, metric_t<Metric::B16> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void pairPM<Metric::M_B16, CompMode::REG>(trellisPM<Metric::M_B16>& old, trellisPM<Metric::M_B16>& now, typename condType<Metric::M_B16, CompMode::REG>::type& cond, metric_t<Metric::M_B16> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	unsigned int bms = (uint16_t)branchMetric[allBmInd0&3];
 	bms = (bms << 16) | (uint16_t)branchMetric[allBmInd1&3];
-	now.val = __vibmax_s16x2(__vadd2(old.val, bms), __vadd2(now.val, __vneg2(bms)), &cond.H, &cond.L);
+	now.val = __vibmax_s16x2(__vadd2(old.val, bms), __vadd2(now.val, __vneg2(bms)), &cond.v0, &cond.v1);
 }
 
 //----------------------------------------------------------------
 
 template<>
-__device__ void pairPM<Metric::B32, CompMode::DPX>(trellisPM<Metric::B32>& old, trellisPM<Metric::B32>& now, condACS<Metric::B32, CompMode::DPX>& cond, metric_t<Metric::B32> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void pairPM<Metric::M_B32, CompMode::DPX>(trellisPM<Metric::M_B32>& old, trellisPM<Metric::M_B32>& now, typename condType<Metric::M_B32, CompMode::DPX>::type& cond, metric_t<Metric::M_B32> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	int bm0 = branchMetric[allBmInd0&3];
 	int bm1 = branchMetric[allBmInd1&3];
 	
@@ -254,7 +227,7 @@ __device__ void pairPM<Metric::B32, CompMode::DPX>(trellisPM<Metric::B32>& old, 
 }
 
 template<>
-__device__ void pairPM<Metric::B32, CompMode::REG>(trellisPM<Metric::B32>& old, trellisPM<Metric::B32>& now, condACS<Metric::B32, CompMode::REG>& cond, metric_t<Metric::B32> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void pairPM<Metric::M_B32, CompMode::REG>(trellisPM<Metric::M_B32>& old, trellisPM<Metric::M_B32>& now, typename condType<Metric::M_B32, CompMode::REG>::type& cond, metric_t<Metric::M_B32> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	int bm0 = branchMetric[allBmInd0&3];
 	int bm1 = branchMetric[allBmInd1&3];
 
@@ -265,7 +238,7 @@ __device__ void pairPM<Metric::B32, CompMode::REG>(trellisPM<Metric::B32>& old, 
 //----------------------------------------------------------------
 
 template<>
-__device__ void pairPM<Metric::FP16, CompMode::REG>(trellisPM<Metric::FP16>& old, trellisPM<Metric::FP16>& now, condACS<Metric::FP16>& cond, metric_t<Metric::FP16> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
+__device__ void pairPM<Metric::M_FP16, CompMode::REG>(trellisPM<Metric::M_FP16>& old, trellisPM<Metric::M_FP16>& now, typename condType<Metric::M_FP16, CompMode::REG>::type& cond, metric_t<Metric::M_FP16> branchMetric[4], unsigned int& allBmInd0, unsigned int& allBmInd1){
 	__half2 bms = __half2(branchMetric[allBmInd1&3], branchMetric[allBmInd0&3]);
 	__half2 pm1 = __hadd2(old.val.fp, bms);
 	__half2 pm2 = __hsub2(now.val.fp, bms);
@@ -275,11 +248,11 @@ __device__ void pairPM<Metric::FP16, CompMode::REG>(trellisPM<Metric::FP16>& old
 
 //============================================= PP update in SE mode =============================================
 
-template<Metric metricType, CompMode compMode=CompMode::REG>
-__device__ void pairPP(trellisPP<metricType>& old, trellisPP<metricType>& now, condACS<metricType, compMode>& cond, int& laneMask){}
+template<DecodeOut outputType, CondMode condMode>
+__device__ void pairPP(trellisPP<outputType>& old, trellisPP<outputType>& now, condACS<condMode>& cond, int& laneMask){}
 
 template<>
-__device__ void pairPP<Metric::B16, CompMode::DPX>(trellisPP<Metric::B16>& old, trellisPP<Metric::B16>& now, condACS<Metric::B16, CompMode::DPX>& cond, int& laneMask){
+__device__ void pairPP<DecodeOut::O_B16, CondMode::MASK>(trellisPP<DecodeOut::O_B16>& old, trellisPP<DecodeOut::O_B16>& now, condACS<CondMode::MASK>& cond, int& laneMask){
 	unsigned int permMap = ((cond.val>>8) & 0x00004444) | 0x00003210;
 	now.val = __byte_perm(old.val, now.val, permMap);
 	cond.val &= 0x00010001;
@@ -288,10 +261,10 @@ __device__ void pairPP<Metric::B16, CompMode::DPX>(trellisPP<Metric::B16>& old, 
 }
 
 template<>
-__device__ void pairPP<Metric::B16, CompMode::REG>(trellisPP<Metric::B16>& old, trellisPP<Metric::B16>& now, condACS<Metric::B16, CompMode::REG>& cond, int& laneMask){
-	unsigned int permMap = (cond.H?0x00004400U:0U) | (cond.L?0x00000044U:0U) | 0x00003210;
+__device__ void pairPP<DecodeOut::O_B16, CondMode::BOOL>(trellisPP<DecodeOut::O_B16>& old, trellisPP<DecodeOut::O_B16>& now, condACS<CondMode::BOOL>& cond, int& laneMask){
+	unsigned int permMap = (cond.v0?0x00004400U:0U) | (cond.v1?0x00000044U:0U) | 0x00003210;
 	now.val = __byte_perm(now.val, old.val, permMap);
-	unsigned int padd = (cond.H?0U:0x00010000U) | (cond.L?0U:0x00000001U);
+	unsigned int padd = (cond.v0?0U:0x00010000U) | (cond.v1?0U:0x00000001U);
 	padd ^= (tx & laneMask) ? 0x00010001 : 0;
 	now.val = (now.val << 1) | padd;
 }
@@ -299,7 +272,7 @@ __device__ void pairPP<Metric::B16, CompMode::REG>(trellisPP<Metric::B16>& old, 
 //----------------------------------------------------------------
 
 template<>
-__device__ void pairPP<Metric::B32, CompMode::DPX>(trellisPP<Metric::B32>& old, trellisPP<Metric::B32>& now, condACS<Metric::B32, CompMode::DPX>& cond, int& laneMask){
+__device__ void pairPP<DecodeOut::O_B32, CondMode::BOOL>(trellisPP<DecodeOut::O_B32>& old, trellisPP<DecodeOut::O_B32>& now, condACS<CondMode::BOOL>& cond, int& laneMask){
 	now.v0 = cond.v0 ? now.v0 : old.v0;
 	cond.v0 ^= ((tx & laneMask) != 0);
 	now.v0 = (now.v0 << 1) | cond.v0;
@@ -309,44 +282,22 @@ __device__ void pairPP<Metric::B32, CompMode::DPX>(trellisPP<Metric::B32>& old, 
 	now.v1 = (now.v1 << 1) | cond.v1;
 }
 
-template<>
-__device__ void pairPP<Metric::B32, CompMode::REG>(trellisPP<Metric::B32>& old, trellisPP<Metric::B32>& now, condACS<Metric::B32, CompMode::REG>& cond, int& laneMask){
-	now.v0 = cond.v0 ? now.v0 : old.v0;
-	cond.v0 ^= ((tx & laneMask) != 0);
-	now.v0 = (now.v0 << 1) | cond.v0;
-
-	now.v1 = cond.v1 ? now.v1 : old.v1;
-	cond.v1 ^= ((tx & laneMask) != 0);
-	now.v1 = (now.v1 << 1) | cond.v1;
-}
-
-//----------------------------------------------------------------
-
-template<>
-__device__ void pairPP<Metric::FP16, CompMode::REG>(trellisPP<Metric::FP16>& old, trellisPP<Metric::FP16>& now, condACS<Metric::FP16>& cond, int& laneMask){
-	unsigned int permMap = ((cond.val>>8) & 0x00004444) | 0x00003210;
-	now.val = __byte_perm(old.val, now.val, permMap);
-	cond.val &= 0x00010001;
-	cond.val ^= (tx & laneMask) ? 0x00010001 : 0;
-	now.val = (now.val << 1) | cond.val;
-}
-
 //============================================= PM normalization =============================================
 
 template<Metric metricType>
 __device__ void pmNormalization(trellisPM<metricType>& old, trellisPM<metricType>& now){}
 
 template<>
-__device__ void pmNormalization<Metric::B16>(trellisPM<Metric::B16>& old, trellisPM<Metric::B16>& now){
-	metric_t<Metric::B16> pmMin = static_cast<metric_t<Metric::B16>>(now.val & 0x0000ffff);
-	metric_t<Metric::B16> pmMax = static_cast<metric_t<Metric::B16>>(now.val >> 16);
+__device__ void pmNormalization<Metric::M_B16>(trellisPM<Metric::M_B16>& old, trellisPM<Metric::M_B16>& now){
+	metric_t<Metric::M_B16> pmMin = static_cast<metric_t<Metric::M_B16>>(now.val & 0x0000ffff);
+	metric_t<Metric::M_B16> pmMax = static_cast<metric_t<Metric::M_B16>>(now.val >> 16);
 	if(pmMin > pmMax){
-		metric_t<Metric::B16> temp = pmMin;
+		metric_t<Metric::M_B16> temp = pmMin;
 		pmMin = pmMax;
 		pmMax = temp;
 	}
 
-	if(__any_sync(0xffffffff, pmMax > static_cast<metric_t<Metric::B16>>(16000))){
+	if(__any_sync(0xffffffff, pmMax > static_cast<metric_t<Metric::M_B16>>(16000))){
 		for(unsigned int delta=16; delta>0; delta/=2)
 			pmMin = min(pmMin, __shfl_down_sync(0xffffffff, pmMin, delta));
 
@@ -363,11 +314,11 @@ __device__ void pmNormalization<Metric::B16>(trellisPM<Metric::B16>& old, trelli
 }
 
 template<>
-__device__ void pmNormalization<Metric::B32>(trellisPM<Metric::B32>& old, trellisPM<Metric::B32>& now){
-	metric_t<Metric::B32> pmMin = now.v0 > now.v1 ? now.v1 : now.v0;
-	metric_t<Metric::B32> pmMax = now.v0 > now.v1 ? now.v0 : now.v1;
+__device__ void pmNormalization<Metric::M_B32>(trellisPM<Metric::M_B32>& old, trellisPM<Metric::M_B32>& now){
+	metric_t<Metric::M_B32> pmMin = now.v0 > now.v1 ? now.v1 : now.v0;
+	metric_t<Metric::M_B32> pmMax = now.v0 > now.v1 ? now.v0 : now.v1;
 
-	if(__any_sync(0xffffffff, pmMax > static_cast<metric_t<Metric::B32>>(1000000000))){
+	if(__any_sync(0xffffffff, pmMax > static_cast<metric_t<Metric::M_B32>>(1000000000))){
 		for(unsigned int delta=16; delta>0; delta/=2)
 			pmMin = min(pmMin, __shfl_down_sync(0xffffffff, pmMin, delta));
 		
@@ -384,10 +335,10 @@ __device__ void pmNormalization<Metric::B32>(trellisPM<Metric::B32>& old, trelli
 }
 
 template<>
-__device__ void pmNormalization<Metric::FP16>(trellisPM<Metric::FP16>& old, trellisPM<Metric::FP16>& now){
+__device__ void pmNormalization<Metric::M_FP16>(trellisPM<Metric::M_FP16>& old, trellisPM<Metric::M_FP16>& now){
 	__half pmLimitMax = __half(500);
-	metric_t<Metric::FP16> pmMin = __hmin(now.val.fp.x, now.val.fp.y);
-	metric_t<Metric::FP16> pmMax = __hmax(now.val.fp.x, now.val.fp.y);
+	metric_t<Metric::M_FP16> pmMin = __hmin(now.val.fp.x, now.val.fp.y);
+	metric_t<Metric::M_FP16> pmMax = __hmax(now.val.fp.x, now.val.fp.y);
 
 	if(__any_sync(0xffffffff, __hlt(pmLimitMax, pmMax))){
 		for(unsigned int delta=16; delta>0; delta/=2)
@@ -417,11 +368,11 @@ __device__ void stageToState(int stageSE, int& state0, int& state1){
 	state1 >>= stageSE;
 }
 
-template<Metric metricType>
-__device__ void pathPrevUpdae(int stageSE, int ppInd, trellisPP<metricType>& old, trellisPP<metricType>& now, decPack_t<metricType> pathPrev[][1<<(CL-1)]){}
+template<DecodeOut outputType>
+__device__ void pathPrevUpdate(int stageSE, int ppInd, trellisPP<outputType>& old, trellisPP<outputType>& now, decPack_t<outputType> pathPrev[][1<<(CL-1)]){}
 
 template<>
-__device__ void pathPrevUpdae<Metric::B16>(int stageSE, int ppInd, trellisPP<Metric::B16>& old, trellisPP<Metric::B16>& now, decPack_t<Metric::B16> pathPrev[][1<<(CL-1)]){
+__device__ void pathPrevUpdate<DecodeOut::O_B16>(int stageSE, int ppInd, trellisPP<DecodeOut::O_B16>& old, trellisPP<DecodeOut::O_B16>& now, decPack_t<DecodeOut::O_B16> pathPrev[][1<<(CL-1)]){
 	int state0, state1;
 	stageToState(stageSE, state0, state1);
 	pathPrev[ppInd/16][state0] = now.val >> 16;
@@ -431,7 +382,7 @@ __device__ void pathPrevUpdae<Metric::B16>(int stageSE, int ppInd, trellisPP<Met
 }
 
 template<>
-__device__ void pathPrevUpdae<Metric::B32>(int stageSE, int ppInd, trellisPP<Metric::B32>& old, trellisPP<Metric::B32>& now, decPack_t<Metric::B32> pathPrev[][1<<(CL-1)]){
+__device__ void pathPrevUpdate<DecodeOut::O_B32>(int stageSE, int ppInd, trellisPP<DecodeOut::O_B32>& old, trellisPP<DecodeOut::O_B32>& now, decPack_t<DecodeOut::O_B32> pathPrev[][1<<(CL-1)]){
 	int state0, state1;
 	stageToState(stageSE, state0, state1);
 	pathPrev[ppInd/32][state0] = now.v0;
@@ -442,46 +393,36 @@ __device__ void pathPrevUpdae<Metric::B32>(int stageSE, int ppInd, trellisPP<Met
 	now.v1 = 0;
 }
 
-template<>
-__device__ void pathPrevUpdae<Metric::FP16>(int stageSE, int ppInd, trellisPP<Metric::FP16>& old, trellisPP<Metric::FP16>& now, decPack_t<Metric::FP16> pathPrev[][1<<(CL-1)]){
-	int state0, state1;
-	stageToState(stageSE, state0, state1);
-	pathPrev[ppInd/16][state0] = now.val >> 16;
-	pathPrev[ppInd/16][state1] = now.val  & 0x0000ffff;
-	old.val = 0;
-	now.val = 0;
-}
-
 //============================================= warp-level shuffling =============================================
 
-template<Metric metricType>
-__device__ void contextExchange(int laneMask, trellisPM<metricType>& nowPM, trellisPP<metricType>& nowPP){}
+template<Metric metricType, DecodeOut outputType>
+__device__ void contextExchange(int laneMask, trellisPM<metricType>& nowPM, trellisPP<outputType>& nowPP){}
 
 template<>
-__device__ void contextExchange<Metric::B16>(int laneMask, trellisPM<Metric::B16>& nowPM, trellisPP<Metric::B16>& nowPP){
+__device__ void contextExchange<Metric::M_B16, DecodeOut::O_B16>(int laneMask, trellisPM<Metric::M_B16>& nowPM, trellisPP<DecodeOut::O_B16>& nowPP){
 	nowPM.val = __shfl_xor_sync(0xffffffff, nowPM.val, laneMask);
 	nowPP.val = __shfl_xor_sync(0xffffffff, nowPP.val, laneMask);
 }
 template<>
-__device__ void contextExchange<Metric::B32>(int laneMask, trellisPM<Metric::B32>& nowPM, trellisPP<Metric::B32>& nowPP){
+__device__ void contextExchange<Metric::M_B32, DecodeOut::O_B32>(int laneMask, trellisPM<Metric::M_B32>& nowPM, trellisPP<DecodeOut::O_B32>& nowPP){
 	nowPM.v0 = __shfl_xor_sync(0xffffffff, nowPM.v0, laneMask);
 	nowPM.v1 = __shfl_xor_sync(0xffffffff, nowPM.v1, laneMask);
 	nowPP.v0 = __shfl_xor_sync(0xffffffff, nowPP.v0, laneMask);
 	nowPP.v1 = __shfl_xor_sync(0xffffffff, nowPP.v1, laneMask);
 }
 template<>
-__device__ void contextExchange<Metric::FP16>(int laneMask, trellisPM<Metric::FP16>& nowPM, trellisPP<Metric::FP16>& nowPP){
+__device__ void contextExchange<Metric::M_FP16, DecodeOut::O_B16>(int laneMask, trellisPM<Metric::M_FP16>& nowPM, trellisPP<DecodeOut::O_B16>& nowPP){
 	nowPM.val.ui = __shfl_xor_sync(0xffffffff, nowPM.val.ui, laneMask);
 	nowPP.val = __shfl_xor_sync(0xffffffff, nowPP.val, laneMask);
 }
 
 //============================================= General ACS function =============================================
 
-template<Metric metricType>
+template<Metric metricType, DecodeOut outputType, CompMode compMode=CompMode::REG>
 __device__ void forwardACS(int stage, 
-	trellisPM<metricType>& oldPM, trellisPP<metricType>& oldPP,
-	trellisPM<metricType>& nowPM, trellisPP<metricType>& nowPP,
-	decPack_t<metricType> pathPrev[][1<<(CL-1)], metric_t<metricType> branchMetric[][4], 
+	trellisPM<metricType>& oldPM, trellisPP<outputType>& oldPP,
+	trellisPM<metricType>& nowPM, trellisPP<outputType>& nowPP,
+	decPack_t<outputType> pathPrev[][1<<(CL-1)], metric_t<metricType> branchMetric[][4], 
 	unsigned int& allBmInd0, unsigned int& allBmInd1, int pmNormStride)
 {
 	int bmInd = stage % bmMemWidth;
@@ -489,19 +430,19 @@ __device__ void forwardACS(int stage,
 	int stageSE = stage % (CL-1);
 
 	if(stageSE < CL-6){
-		condACS<metricType, CompMode::REG> cond;
-		selfPM<metricType, CompMode::REG>(oldPM, nowPM, cond, branchMetric[bmInd], allBmInd0);
-		selfPP<metricType, CompMode::REG>(oldPP, nowPP, cond);
+		typename condType<metricType, compMode>::type cond;
+		selfPM<metricType, compMode>(oldPM, nowPM, cond, branchMetric[bmInd], allBmInd0);
+		selfPP<outputType, condModeEval<metricType, compMode>::value>(oldPP, nowPP, cond);
 		oldPM = nowPM;
 		oldPP = nowPP;
 	}
 	else{
 		int laneMask = (1<<(stageSE-CL+6));
-		contextExchange<metricType>(laneMask, nowPM, nowPP);
+		contextExchange<metricType, outputType>(laneMask, nowPM, nowPP);
 
-		condACS<metricType, CompMode::REG> cond;
-		pairPM<metricType, CompMode::REG>(oldPM, nowPM, cond, branchMetric[bmInd], allBmInd0, allBmInd1);
-		pairPP<metricType, CompMode::REG>(oldPP, nowPP, cond, laneMask);
+		typename condType<metricType, compMode>::type cond;
+		pairPM<metricType, compMode>(oldPM, nowPM, cond, branchMetric[bmInd], allBmInd0, allBmInd1);
+		pairPP<outputType, condModeEval<metricType, compMode>::value>(oldPP, nowPP, cond, laneMask);
 		oldPM = nowPM;
 		oldPP = nowPP;
 	}
@@ -518,5 +459,5 @@ __device__ void forwardACS(int stage,
 	// 	printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state1, nowPM.v1, nowPP.v1&1);
 	// }
 
-	if((ppInd+1) % bpp<metricType> == 0) pathPrevUpdae<metricType>(stageSE, ppInd, oldPP, nowPP, pathPrev);
+	if((ppInd+1) % bpp<outputType> == 0) pathPrevUpdate<outputType>(stageSE, ppInd, oldPP, nowPP, pathPrev);
 }

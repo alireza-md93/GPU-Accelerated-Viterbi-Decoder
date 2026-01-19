@@ -160,22 +160,22 @@ __device__ metric_t<metricType> intToBM(int val){
 }
 
 template<>
-__device__ metric_t<Metric::B16> intToBM<Metric::B16>(int val){
-	return static_cast<metric_t<Metric::B16>>(val);
+__device__ metric_t<Metric::M_B16> intToBM<Metric::M_B16>(int val){
+	return static_cast<metric_t<Metric::M_B16>>(val);
 }
 
 template<>
-__device__ metric_t<Metric::B32> intToBM<Metric::B32>(int val){
-	return static_cast<metric_t<Metric::B32>>(val);
+__device__ metric_t<Metric::M_B32> intToBM<Metric::M_B32>(int val){
+	return static_cast<metric_t<Metric::M_B32>>(val);
 }
 
 template<>
-__device__ metric_t<Metric::FP16> intToBM<Metric::FP16>(int val){
+__device__ metric_t<Metric::M_FP16> intToBM<Metric::M_FP16>(int val){
 	return __half(val);
 }
 
 
-template<Metric metricType, ChannelIn inputType>
+template<ChannelIn inputType, Metric metricType>
 __device__ void bmCalc(int stage, int num, metric_t<metricType> branchMetric[][4], encPack_t<inputType>* coded, bmCalcHelper<inputType>& helper){
 	for(int i=stage+helper.dataInd; i<stage+num; i+=(bdx>>2)){
 		branchMetric[i%bmMemWidth][helper.bmInd] = intToBM<metricType>(bmCalcInt<inputType>(i, coded, helper));
@@ -194,13 +194,13 @@ __device__ void bmIndCalc(unsigned int& allBmInd0, unsigned int& allBmInd1){
 		inState0 &= (1<<CL)-1;
 		unsigned int inState1 = inState0 ^ (1<<(CL-1-ind));
 
-		bool out0 = __popc(inState0 & ViterbiCUDA<Metric::B16, ChannelIn::HARD>::polyn1) % 2;
-		bool out1 = __popc(inState0 & ViterbiCUDA<Metric::B16, ChannelIn::HARD>::polyn2) % 2;
+		bool out0 = __popc(inState0 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn1) % 2;
+		bool out1 = __popc(inState0 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn2) % 2;
 		int bmInd = (out0 << 1) | out1;
 		allBmInd0 = (allBmInd0 << 2) | bmInd;
 
-		out0 = __popc(inState1 & ViterbiCUDA<Metric::B16, ChannelIn::HARD>::polyn1) % 2;
-		out1 = __popc(inState1 & ViterbiCUDA<Metric::B16, ChannelIn::HARD>::polyn2) % 2;
+		out0 = __popc(inState1 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn1) % 2;
+		out1 = __popc(inState1 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn2) % 2;
 		bmInd = (out0 << 1) | out1;
 		allBmInd1 = (allBmInd1 << 2) | bmInd;
 	}

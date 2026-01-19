@@ -97,9 +97,9 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   The `ViterbiCUDA` class is templated as `ViterbiCUDA<Metric, ChannelIn>`.
   
   - **`Metric`**: Defines the data type for branch and path metrics (`metric_t`) and the packed decoded output (`decPack_t`).
-    - **`Metric::B16`**: Uses `int16_t` for `metric_t` and `uint16_t` for `decPack_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
-    - **`Metric::B32`**: Uses `int32_t` for `metric_t` and `uint32_t` for `decPack_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
-    - **`Metric::F16`**: Uses `__half` for `metric_t` and `uint16_t` for `decPack_t`. This uses FP16/Tensor cores for metric calculations.
+    - **`Metric::M_B16`**: Uses `int16_t` for `metric_t` and `uint16_t` for `decPack_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
+    - **`Metric::M_B32`**: Uses `int32_t` for `metric_t` and `uint32_t` for `decPack_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
+    - **`Metric::M_FP16`**: Uses `__half` for `metric_t` and `uint16_t` for `decPack_t`. This uses FP16/Tensor cores for metric calculations.
   
   - **`ChannelIn`**: Defines the input data type from the channel (`encPack_t`). For soft-decision types, negative values are treated as a '0' bit and positive values as a '1' bit.
     - **`ChannelIn::HARD`**: `int32_t` containing 32 packed 1-bit hard-decision values.
@@ -108,7 +108,7 @@ The compiled executable runs a simulation pipeline that generates random bits, e
     - **`ChannelIn::SOFT16`**: `int32_t` containing 2 packed 16-bit soft-decision values.
     - **`ChannelIn::FP32`**: `float` representing a single soft-decision value.
 
-  Please make sure that `Metric::B16` and `ChannelIn::SOFT16` are not used together since the metric type must be wider that the input type to avoid overflow.
+  Please make sure that `Metric::M_B16` and `ChannelIn::SOFT16` are not used together since the metric type must be wider that the input type to avoid overflow.
   
   ### Class Interface
   
@@ -149,15 +149,15 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   #include "viterbi.h"
   
   // Instantiate a decoder for 8-bit soft-decision inputs and a 32-bit metric core
-  ViterbiCUDA<Metric::B32, ChannelIn::SOFT8> decoder;
+  ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8> decoder;
   
   size_t num_encoded_bits = 1000000;
   size_t input_size_bytes = decoder.getInputSize(num_encoded_bits);
   size_t output_size_bytes = decoder.getOutputSize(num_encoded_bits);
   
   // Allocate host memory
-  auto host_input = new ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::encPack_t[input_size_bytes / sizeof(ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::encPack_t)];
-  auto host_output = new ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::decPack_t[output_size_bytes / sizeof(ViterbiCUDA<Metric::B32, ChannelIn::SOFT8>::decPack_t)];
+  auto host_input = new ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::encPack_t[input_size_bytes / sizeof(ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::encPack_t)];
+  auto host_output = new ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::decPack_t[output_size_bytes / sizeof(ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::decPack_t)];
   
   // ... fill host_input with data ...
   

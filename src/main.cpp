@@ -5,39 +5,44 @@
 #include <iostream>
 #include "viterbiDF.h"
 
-void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metricType, ChannelIn& inputType, bool& verbose);
+void parseArg(int argc, char *argv[], int& messageLen, float& snr, ChannelIn& inputType, Metric& metricType, DecodeOut& outputType, CompMode& compMode, bool& verbose);
 
-template<Metric metricType, ChannelIn inputType>
+template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
 void runPipeline(int messageLen, float snr, int& BENs, bool showStatus=false);
-void runPipelineWrapper(Metric metricType, ChannelIn inputType, int messageLen, float snr, int& BENs, bool showStatus=false);
+void runPipelineWrapper(ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode, int messageLen, float snr, int& BENs, bool showStatus=false);
 
 //-----------------------------------------------------------------------------
 
 int main(int argc, char *argv[]) {
     // get parameters from command line
-    Metric metricType;
 	ChannelIn inputType;
+    Metric metricType;
+    DecodeOut outputType;
+    CompMode compMode;
     int messageLen;
 	float snr;
     bool verbose;
-    parseArg(argc, argv, messageLen, snr, metricType, inputType, verbose);
-    if(metricType == Metric::B16 && inputType == ChannelIn::SOFT16){
+    parseArg(argc, argv, messageLen, snr, inputType, metricType, outputType, compMode, verbose);
+    if(metricType == Metric::M_B16 && inputType == ChannelIn::SOFT16){
         std::cerr << "Error: 16-bit metric does not support 16-bit soft decision input." << std::endl;
         return -1;
     }
-    if(metricType == Metric::FP16 && inputType == ChannelIn::SOFT16){
+    if(metricType == Metric::M_FP16 && inputType == ChannelIn::SOFT16){
         std::cerr << "Error: fp16 metric does not support 16-bit soft decision input." << std::endl;
         return -1;
     }
-    if(metricType == Metric::FP16 && inputType == ChannelIn::SOFT8){
+    if(metricType == Metric::M_FP16 && inputType == ChannelIn::SOFT8){
         std::cerr << "Error: fp16 metric does not support 8-bit soft decision input." << std::endl;
+        return -1;
+    }
+    if(metricType == Metric::M_FP16 && compMode == CompMode::DPX){
+        std::cerr << "Error: fp16 metric does not support DPX computation mode." << std::endl;
         return -1;
     }
 
     if(verbose){
         std::cout << "Message Length: " << messageLen << std::endl;
         std::cout << "SNR: " << snr << " dB" <<  std::endl;
-        std::cout << "Metric Type: " << ((metricType == Metric::B16) ? "16-bit" : ((metricType == Metric::B32) ? "32-bit" : "FP16")) << std::endl;
         std::cout << "Input Channel Type: ";
         switch(inputType){
             case ChannelIn::HARD:
@@ -59,13 +64,16 @@ int main(int argc, char *argv[]) {
                 std::cout << "Unknown Type" << std::endl;
                 break;
         }
+        std::cout << "Metric Type: " << ((metricType == Metric::M_B16) ? "16-bit" : ((metricType == Metric::M_B32) ? "32-bit" : "FP16")) << std::endl;
+        std::cout << "Output Type: " << ((outputType == DecodeOut::O_B16) ? "16-bit" : "32-bit") << std::endl;
+        std::cout << "Computation Mode: " << ((compMode == CompMode::REG) ? "Regular" : "DPX") << std::endl;
         std::cout << std::endl;
     }
 
     // --- Dataflow Pipeline Execution Section ---
     int BENs; //bit error number
     double BERs; //bit error rate
-    runPipelineWrapper(metricType, inputType, messageLen, snr, BENs, verbose);
+    runPipelineWrapper(inputType, metricType, outputType, compMode, messageLen, snr, BENs, verbose);
 	
 	BERs = (double)BENs / messageLen;
 
@@ -79,43 +87,43 @@ int main(int argc, char *argv[]) {
 
 //-----------------------------------------------------------------------------
 
-void runPipelineWrapper(Metric metricType, ChannelIn inputType, int messageLen, float snr, int& BENs, bool showStatus){
-    if(metricType == Metric::B16){
-        if(inputType == ChannelIn::HARD)           runPipeline<Metric::B16, ChannelIn::HARD>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT4)     runPipeline<Metric::B16, ChannelIn::SOFT4>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT8)     runPipeline<Metric::B16, ChannelIn::SOFT8>(messageLen, snr, BENs, showStatus);
-        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::B16, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::FP32)      runPipeline<Metric::B16, ChannelIn::FP32>(messageLen, snr, BENs, showStatus);
+void runPipelineWrapper(ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode, int messageLen, float snr, int& BENs, bool showStatus){
+    if(metricType == Metric::M_B16){
+        if(inputType == ChannelIn::HARD)           runPipeline<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT4)     runPipeline<ChannelIn::SOFT4, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT8)     runPipeline<ChannelIn::SOFT8, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT16)    runPipeline<ChannelIn::SOFT16, Metric::M_B16>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::FP32)      runPipeline<ChannelIn::FP32, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
     }
-    else if(metricType == Metric::B32){
-        if(inputType == ChannelIn::HARD)           runPipeline<Metric::B32, ChannelIn::HARD>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT4)     runPipeline<Metric::B32, ChannelIn::SOFT4>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT8)     runPipeline<Metric::B32, ChannelIn::SOFT8>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::B32, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::FP32)      runPipeline<Metric::B32, ChannelIn::FP32>(messageLen, snr, BENs, showStatus);
+    else if(metricType == Metric::M_B32){
+        if(inputType == ChannelIn::HARD)           runPipeline<ChannelIn::HARD, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT4)     runPipeline<ChannelIn::SOFT4, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT8)     runPipeline<ChannelIn::SOFT8, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT16)    runPipeline<ChannelIn::SOFT16, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::FP32)      runPipeline<ChannelIn::FP32, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>(messageLen, snr, BENs, showStatus);
     }
-    else if(metricType == Metric::FP16){
-        if(inputType == ChannelIn::HARD)           runPipeline<Metric::FP16, ChannelIn::HARD>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::SOFT4)     runPipeline<Metric::FP16, ChannelIn::SOFT4>(messageLen, snr, BENs, showStatus);
-        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT8)     runPipeline<Metric::FP16, ChannelIn::SOFT8>(messageLen, snr, BENs, showStatus);
-        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT16)    runPipeline<Metric::FP16, ChannelIn::SOFT16>(messageLen, snr, BENs, showStatus);
-        else if(inputType == ChannelIn::FP32)      runPipeline<Metric::FP16, ChannelIn::FP32>(messageLen, snr, BENs, showStatus);
+    else if(metricType == Metric::M_FP16){
+        if(inputType == ChannelIn::HARD)           runPipeline<ChannelIn::HARD, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::SOFT4)     runPipeline<ChannelIn::SOFT4, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
+        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT8)     runPipeline<ChannelIn::SOFT8, Metric::M_FP16, DecodeOut::O_B16>(messageLen, snr, BENs, showStatus);
+        //--- never to be enabled ---// else if(inputType == ChannelIn::SOFT16)    runPipeline<ChannelIn::SOFT16, Metric::M_FP16, DecodeOut::O_B16>(messageLen, snr, BENs, showStatus);
+        else if(inputType == ChannelIn::FP32)      runPipeline<ChannelIn::FP32, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>(messageLen, snr, BENs, showStatus);
     }
     else{
         std::cerr << "Unsupported metric type." << std::endl;
     }
 }
 
-template<Metric metricType, ChannelIn inputType>
+template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
 void runPipeline(int messageLen, float snr, int& BENs, bool showStatus){
-    constexpr int CL = ViterbiCUDA<metricType, inputType>::constLen;
-    constexpr int polyn1 = ViterbiCUDA<metricType, inputType>::polyn1;
-    constexpr int polyn2 = ViterbiCUDA<metricType, inputType>::polyn2;
-    constexpr int extraL = ViterbiCUDA<metricType, inputType>::extraL;
-    constexpr int extraR = ViterbiCUDA<metricType, inputType>::extraR;
-    using decVec_t = typename ViterbiDecoder<metricType, inputType>::decVec_t;
+    constexpr int CL = ViterbiCUDA<inputType, metricType, outputType, compMode>::constLen;
+    constexpr int polyn1 = ViterbiCUDA<inputType, metricType, outputType, compMode>::polyn1;
+    constexpr int polyn2 = ViterbiCUDA<inputType, metricType, outputType, compMode>::polyn2;
+    constexpr int extraL = ViterbiCUDA<inputType, metricType, outputType, compMode>::extraL;
+    constexpr int extraR = ViterbiCUDA<inputType, metricType, outputType, compMode>::extraR;
+    using decVec_t = typename ViterbiDecoder<inputType, metricType, outputType, compMode>::decVec_t;
 
-	int bitsPerPack = ViterbiDecoder<metricType, inputType>::bitsPerPack;
+	int bitsPerPack = ViterbiDecoder<inputType, metricType, outputType, compMode>::bitsPerPack;
 	
 	// --- Dataflow Pipeline Setup ---
 	std::random_device rd;
@@ -125,7 +133,7 @@ void runPipeline(int messageLen, float snr, int& BENs, bool showStatus){
     AddNoise noise(pow(10, -snr/5.0), rd());
     // AddNoise noise(std::numeric_limits<float>::infinity());
     SoftDecisionPacker packer(inputType, 40000.0);
-    ViterbiDecoder<metricType, inputType> viterbi;
+    ViterbiDecoder<inputType, metricType, outputType, compMode> viterbi;
 
     // Build the pipeline, probing the output of the noise adder.
     Pipeline pipe = randGen.probe() | convEnc | noise | packer | viterbi;
@@ -161,12 +169,14 @@ void runPipeline(int messageLen, float snr, int& BENs, bool showStatus){
     // --- End of BER Calculation Section ---
 }
 
-void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metricType, ChannelIn& inputType, bool& verbose) {
+void parseArg(int argc, char *argv[], int& messageLen, float& snr, ChannelIn& inputType, Metric& metricType, DecodeOut& outputType, CompMode& compMode, bool& verbose) {
     // Set default values
     messageLen = 32000000;
     snr = 15.0;
-    metricType = Metric::B32;
+    metricType = Metric::M_B32;
     inputType = ChannelIn::HARD;
+    outputType = DecodeOut::O_B16;
+    compMode = CompMode::REG;
     verbose = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -176,8 +186,10 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
                       << "Options:\n"
                       << "  -n, --num <integer>      Set the message length.\n"
                       << "  -s, --snr <float>        Set the Signal-to-Noise Ratio (SNR).\n"
-                      << "  -m, --metric <type>      Set the metric type (b16, b32, f16).\n"
                       << "  -i, --input <type>       Set the input channel type (HARD|h, SOFT4|s4, SOFT8|s8, SOFT16|s16, FP32|f).\n"
+                      << "  -m, --metric <type>      Set the metric type (b16, b32, f16).\n"
+                      << "  -o, --output <type>      Set the output type (b16, b32).\n"
+                      << "  -c, --compMode <type>    Set the computation mode (REG|reg, DPX|dpx).\n"
                       << "  -v, --verbose            Enable verbose output.\n"
                       << "  -h, --help               Display this help message.\n";
             exit(0);
@@ -198,11 +210,11 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
         } else if ((arg == "-m" || arg == "--metric") && i + 1 < argc) {
             std::string metricStr = argv[++i];
             if (metricStr == "b16") {
-                metricType = Metric::B16;
+                metricType = Metric::M_B16;
             } else if (metricStr == "b32") {
-                metricType = Metric::B32;
+                metricType = Metric::M_B32;
             } else if (metricStr == "f16") {
-                metricType = Metric::FP16;
+                metricType = Metric::M_FP16;
             } else {
                 std::cerr << "Error: Invalid metric type for " << arg << "." << std::endl;
                 exit(1);
@@ -221,6 +233,26 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
                 inputType = ChannelIn::FP32;
             } else {
                 std::cerr << "Error: Invalid input channel type for " << arg << "." << std::endl;
+                exit(1);
+            }
+        } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
+            std::string outputStr = argv[++i];
+            if (outputStr == "b16") {
+                outputType = DecodeOut::O_B16;
+            } else if (outputStr == "b32") {
+                outputType = DecodeOut::O_B32;
+            } else {
+                std::cerr << "Error: Invalid output type for " << arg << "." << std::endl;
+                exit(1);
+            }
+        } else if ((arg == "-c" || arg == "--compMode") && i + 1 < argc) {
+            std::string compModeStr = argv[++i];
+            if (compModeStr == "REG" || compModeStr == "reg") {
+                compMode = CompMode::REG;
+            } else if (compModeStr == "DPX" || compModeStr == "dpx") {
+                compMode = CompMode::DPX;
+            } else {
+                std::cerr << "Error: Invalid computation mode for " << arg << "." << std::endl;
                 exit(1);
             }
         } else if (arg == "-v" || arg == "--verbose") {
