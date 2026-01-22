@@ -33,6 +33,11 @@ struct OptionsValid{
 
 		((options & METRIC_MASK) == Metric::M_FP16 &&
 		 (options & COMP_MASK) == CompMode::DPX) ? false : true;
+
+	// static constexpr bool value = 
+	// 	((options & CHANNEL_MASK) == ChannelIn::HARD && 
+	// 	 (options & METRIC_MASK) == Metric::M_B32 &&
+	// 	 (options & DECODE_MASK) == DecodeOut::O_B32) ? true : false;
 };
 
 template<int options = 0, bool enable = OptionsValid<options>::value>
@@ -40,13 +45,8 @@ class ViterbiCUDA;
 
 template<int options>
 struct ViterbiCUDA<options, false>{
-	// static_assert(OptionsValid<options>::value, "The specified configuration is not supported.");
-};
-
-template<int options>
-class ViterbiCUDA<options, true> {
 	public:
-
+	
 	static constexpr ChannelIn inputType = static_cast<ChannelIn>(options & CHANNEL_MASK);
 	static constexpr Metric metricType = static_cast<Metric>(options & METRIC_MASK);
 	static constexpr DecodeOut outputType = static_cast<DecodeOut>(options & DECODE_MASK);
@@ -86,6 +86,43 @@ class ViterbiCUDA<options, true> {
 										(inputType == ChannelIn::SOFT8) ? 8 :
 										(inputType == ChannelIn::SOFT16) ? 16 : FPprecision;
 	
+};
+
+template<int options>
+class ViterbiCUDA<options, true> : public ViterbiCUDA<options, false>{
+	public:
+
+	using ViterbiCUDA<options, false>::inputType;
+	using ViterbiCUDA<options, false>::metricType;
+	using ViterbiCUDA<options, false>::outputType;
+	using ViterbiCUDA<options, false>::compMode;
+
+	using typename ViterbiCUDA<options, false>::metric_t;
+	using typename ViterbiCUDA<options, false>::decPack_t;
+	using typename ViterbiCUDA<options, false>::encPack_t;
+
+	using ViterbiCUDA<options, false>::roundup;
+
+	using ViterbiCUDA<options, false>::constLen;
+	using ViterbiCUDA<options, false>::polyn1;
+	using ViterbiCUDA<options, false>::polyn2;
+
+	using ViterbiCUDA<options, false>::bitsPerMetric;
+	using ViterbiCUDA<options, false>::bitsPerPack;
+	using ViterbiCUDA<options, false>::extraL_raw;
+	using ViterbiCUDA<options, false>::extraR_raw;
+	using ViterbiCUDA<options, false>::slideSize_raw;
+	using ViterbiCUDA<options, false>::extraL;
+	using ViterbiCUDA<options, false>::extraR;
+	using ViterbiCUDA<options, false>::slideSize;
+	using ViterbiCUDA<options, false>::forwardLen;
+	using ViterbiCUDA<options, false>::bmMemWidth;
+    using ViterbiCUDA<options, false>::blockDimY;
+    using ViterbiCUDA<options, false>::FPprecision;
+	using ViterbiCUDA<options, false>::encDataPerPack;
+	using ViterbiCUDA<options, false>::encDataWidth;
+	
+
 	ViterbiCUDA();
 	ViterbiCUDA(size_t inputNum);
 	~ViterbiCUDA();
