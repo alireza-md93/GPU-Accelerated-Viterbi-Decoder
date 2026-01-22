@@ -4,14 +4,53 @@
 #include <type_traits>
 #include <cuda_fp16.h>
 
-enum Metric {M_B16, M_B32, M_FP16};
-enum CompMode{DPX, REG};
-enum ChannelIn {HARD, SOFT4, SOFT8, SOFT16, FP32};
-enum DecodeOut {O_B16, O_B32};
+constexpr int CHANNEL_SHIFT = 0;
+constexpr int METRIC_SHIFT = 4;
+constexpr int DECODE_SHIFT = 8;
+constexpr int COMP_SHIFT = 12;
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode = CompMode::REG>
-class ViterbiCUDA{
+constexpr int CHANNEL_MASK = (0xf << 0);
+constexpr int METRIC_MASK = (0xf << 4);
+constexpr int DECODE_MASK = (0xf << 8);
+constexpr int COMP_MASK =  (0xf <<12);
+
+enum ChannelIn {HARD=(0x0<<CHANNEL_SHIFT), SOFT4=(0x1<<CHANNEL_SHIFT), SOFT8=(0x2<<CHANNEL_SHIFT), SOFT16=(0x3<<CHANNEL_SHIFT), FP32=(0x4<<CHANNEL_SHIFT)};
+enum Metric {M_B32=(0x0<<METRIC_SHIFT), M_B16=(0x1<<METRIC_SHIFT), M_FP16=(0x2<<METRIC_SHIFT)};
+enum DecodeOut {O_B32=(0x0<<DECODE_SHIFT), O_B16=(0x1<<DECODE_SHIFT)};
+enum CompMode{REG=(0x0<<COMP_SHIFT), DPX=(0x1<<COMP_SHIFT)};
+
+template<int options>
+struct OptionsValid{
+	static constexpr bool value = 
+		((options & CHANNEL_MASK) == ChannelIn::SOFT8 &&
+		 (options & METRIC_MASK) == Metric::M_FP16) ||
+
+		((options & CHANNEL_MASK) == ChannelIn::SOFT16 &&
+		 (options & METRIC_MASK) == Metric::M_FP16) ||
+
+		((options & CHANNEL_MASK) == ChannelIn::SOFT16 &&
+		 (options & METRIC_MASK) == Metric::M_B16) ||
+
+		((options & METRIC_MASK) == Metric::M_FP16 &&
+		 (options & COMP_MASK) == CompMode::DPX) ? false : true;
+};
+
+template<int options = 0, bool enable = OptionsValid<options>::value>
+class ViterbiCUDA;
+
+template<int options>
+struct ViterbiCUDA<options, false>{
+	// static_assert(OptionsValid<options>::value, "The specified configuration is not supported.");
+};
+
+template<int options>
+class ViterbiCUDA<options, true> {
 	public:
+
+	static constexpr ChannelIn inputType = static_cast<ChannelIn>(options & CHANNEL_MASK);
+	static constexpr Metric metricType = static_cast<Metric>(options & METRIC_MASK);
+	static constexpr DecodeOut outputType = static_cast<DecodeOut>(options & DECODE_MASK);
+	static constexpr CompMode compMode = static_cast<CompMode>(options & COMP_MASK);
 
 	using metric_t = 	std::conditional_t<metricType == Metric::M_B16, int16_t, 
 						std::conditional_t<metricType == Metric::M_B32, int32_t,

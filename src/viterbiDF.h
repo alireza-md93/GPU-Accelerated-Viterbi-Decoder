@@ -167,21 +167,21 @@ class SoftDecisionPacker : public ComputeElement {
 };
 
 // 5) Viterbi Decoder wrapper
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode = CompMode::REG>
+template<int options>
 struct ViterbiDecoder : ComputeElement {
 private:
-	std::unique_ptr<ViterbiCUDA<inputType, metricType, outputType, compMode>> viterbi;
+    std::unique_ptr<ViterbiCUDA<options>> viterbi;
 
 public:
-    using decPack_t = typename ViterbiCUDA<inputType, metricType, outputType, compMode>::decPack_t;
-    using decVec_t = std::vector<typename ViterbiCUDA<inputType, metricType, outputType, compMode>::decPack_t>; // packed bits (8 bits per byte)
-    using encPack_t = typename ViterbiCUDA<inputType, metricType, outputType, compMode>::encPack_t;
-    static constexpr int bitsPerPack = ViterbiCUDA<inputType, metricType, outputType, compMode>::bitsPerPack;
-    static constexpr int encDataPerPack = ViterbiCUDA<inputType, metricType, outputType, compMode>::encDataPerPack;
+    using decPack_t = typename ViterbiCUDA<options>::decPack_t;
+    using decVec_t = std::vector<typename ViterbiCUDA<options>::decPack_t>; // packed bits (8 bits per byte)
+    using encPack_t = typename ViterbiCUDA<options>::encPack_t;
+    static constexpr int bitsPerPack = ViterbiCUDA<options>::bitsPerPack;
+    static constexpr int encDataPerPack = ViterbiCUDA<options>::encDataPerPack;
 
     // In real project this would call your GPU viterbi_run
-    ViterbiDecoder(): viterbi(new ViterbiCUDA<inputType, metricType, outputType, compMode>()) {}
-	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<inputType, metricType, outputType, compMode>(messageLen)) {}
+    ViterbiDecoder(): viterbi(new ViterbiCUDA<options>()) {}
+	ViterbiDecoder(int messageLen): viterbi(new ViterbiCUDA<options>(messageLen)) {}
 	~ViterbiDecoder() = default;
     std::any process(const OptData& in) override {
         if(!in) throw std::runtime_error("ViterbiDecoder expects input reals");
@@ -207,21 +207,3 @@ public:
         return ComputeElement::getStatusString(key);
     }
 };
-
-template struct ViterbiDecoder<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::SOFT4, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::SOFT8, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-//--- never to be enabled ---// template struct ViterbiDecoder<ChannelIn::SOFT16, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::FP32, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-
-template struct ViterbiDecoder<ChannelIn::HARD, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::SOFT4, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::SOFT8, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::SOFT16, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::FP32, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-
-template struct ViterbiDecoder<ChannelIn::HARD, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::SOFT4, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-//--- never to be enabled ---// template struct ViterbiDecoder<ChannelIn::SOFT8, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-//--- never to be enabled ---// template struct ViterbiDecoder<ChannelIn::SOFT16, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-template struct ViterbiDecoder<ChannelIn::FP32, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;

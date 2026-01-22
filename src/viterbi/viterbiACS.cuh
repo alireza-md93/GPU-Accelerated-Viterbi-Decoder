@@ -415,25 +415,36 @@ __device__ void pathPrevUpdate<DecodeOut::O_B32>(int stageSE, int ppInd, trellis
 
 //============================================= warp-level shuffling =============================================
 
-template<Metric metricType, DecodeOut outputType>
-__device__ void contextExchange(int laneMask, trellisPM<metricType>& nowPM, trellisPP<outputType>& nowPP){}
+template<Metric metricType>
+__device__ void pmExchange(int laneMask, trellisPM<metricType>& nowPM){}
 
 template<>
-__device__ void contextExchange<Metric::M_B16, DecodeOut::O_B16>(int laneMask, trellisPM<Metric::M_B16>& nowPM, trellisPP<DecodeOut::O_B16>& nowPP){
+__device__ void pmExchange<Metric::M_B16>(int laneMask, trellisPM<Metric::M_B16>& nowPM){
 	nowPM.val = __shfl_xor_sync(0xffffffff, nowPM.val, laneMask);
-	nowPP.val = __shfl_xor_sync(0xffffffff, nowPP.val, laneMask);
 }
 template<>
-__device__ void contextExchange<Metric::M_B32, DecodeOut::O_B32>(int laneMask, trellisPM<Metric::M_B32>& nowPM, trellisPP<DecodeOut::O_B32>& nowPP){
+__device__ void pmExchange<Metric::M_B32>(int laneMask, trellisPM<Metric::M_B32>& nowPM){
 	nowPM.v0 = __shfl_xor_sync(0xffffffff, nowPM.v0, laneMask);
 	nowPM.v1 = __shfl_xor_sync(0xffffffff, nowPM.v1, laneMask);
-	nowPP.v0 = __shfl_xor_sync(0xffffffff, nowPP.v0, laneMask);
-	nowPP.v1 = __shfl_xor_sync(0xffffffff, nowPP.v1, laneMask);
 }
 template<>
-__device__ void contextExchange<Metric::M_FP16, DecodeOut::O_B16>(int laneMask, trellisPM<Metric::M_FP16>& nowPM, trellisPP<DecodeOut::O_B16>& nowPP){
+__device__ void pmExchange<Metric::M_FP16>(int laneMask, trellisPM<Metric::M_FP16>& nowPM){
 	nowPM.val.ui = __shfl_xor_sync(0xffffffff, nowPM.val.ui, laneMask);
+}
+
+//----------------------------------------------------------------
+
+template<DecodeOut outputType>
+__device__ void ppExchange(int laneMask, trellisPP<outputType>& nowPP){}
+
+template<>
+__device__ void ppExchange<DecodeOut::O_B16>(int laneMask, trellisPP<DecodeOut::O_B16>& nowPP){
 	nowPP.val = __shfl_xor_sync(0xffffffff, nowPP.val, laneMask);
+}
+template<>
+__device__ void ppExchange<DecodeOut::O_B32>(int laneMask, trellisPP<DecodeOut::O_B32>& nowPP){
+	nowPP.v0 = __shfl_xor_sync(0xffffffff, nowPP.v0, laneMask);
+	nowPP.v1 = __shfl_xor_sync(0xffffffff, nowPP.v1, laneMask);
 }
 
 //============================================= General ACS function =============================================
@@ -458,7 +469,8 @@ __device__ void forwardACS(int stage,
 	}
 	else{
 		int laneMask = (1<<(stageSE-CL+6));
-		contextExchange<metricType, outputType>(laneMask, nowPM, nowPP);
+		pmExchange<metricType>(laneMask, nowPM);
+		ppExchange<outputType>(laneMask, nowPP);
 
 		typename condType<metricType, compMode>::type cond;
 		pairPM<metricType, compMode>(oldPM, nowPM, cond, branchMetric[bmInd], allBmInd0, allBmInd1);
@@ -474,19 +486,32 @@ __device__ void forwardACS(int stage,
 
 	// if(bx==0 && ty==0){
 	// 	int state0, state1;
+	// 	int pm0, pm1;
+	// 	int pp0, pp1;
+		
 	// 	stageToState(stageSE, state0, state1);
-	// 	if constexpr (metricType == Metric::M_B16 && outputType == DecodeOut::O_B16){
-	// 		printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state0, nowPM.val&0xffff, nowPP.val&1);
-	// 		printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state1, nowPM.val>>16, (nowPP.val>>16)&1);
+
+	// 	if constexpr (metricType == Metric::M_B16){
+	// 		pm0 = nowPM.val & 0xffff;
+	// 		pm1 = nowPM.val >> 16;
+	// 	} else if constexpr (metricType == Metric::M_B32){
+	// 		pm0 = nowPM.v0;
+	// 		pm1 = nowPM.v1;
+	// 	} else if constexpr (metricType == Metric::M_FP16){
+	// 		pm0 = static_cast<int>(__half2float(nowPM.val.fp.x));
+	// 		pm1 = static_cast<int>(__half2float(nowPM.val.fp.y));
 	// 	}
-	// 	else if constexpr (metricType == Metric::M_FP16 && outputType == DecodeOut::O_B16){
-	// 		printf("=== stage:%d state:%d pm:%f pp:%x\n", stage, state0, __half2float(nowPM.val.fp.x), nowPP.val&1);
-	// 		printf("=== stage:%d state:%d pm:%f pp:%x\n", stage, state1, __half2float(nowPM.val.fp.y), (nowPP.val>>16)&1);
+
+	// 	if constexpr (outputType == DecodeOut::O_B16){
+	// 		pp0 = nowPP.val & 1;
+	// 		pp1 = (nowPP.val >> 16) & 1;
+	// 	} else if constexpr (outputType == DecodeOut::O_B32){
+	// 		pp0 = nowPP.v0 & 1;
+	// 		pp1 = nowPP.v1 & 1;
 	// 	}
-	// 	else if constexpr (metricType == Metric::M_B32 && outputType == DecodeOut::O_B32){
-	// 		printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state0, nowPM.v0, nowPP.v0&1);
-	// 		printf("=== stage:%d state:%d pm:%d pp:%x\n", stage, state1, nowPM.v1, nowPP.v1&1);
-	// 	}
+
+	// 	printf("=== stage:%d state:%d pm:%d pp:%d\n", stage, state0, pm0, pp0);
+	// 	printf("=== stage:%d state:%d pm:%d pp:%d\n", stage, state1, pm1, pp1);
 	// }
 
 	if((ppInd+1) % bpp<outputType> == 0) pathPrevUpdate<outputType>(stageSE, ppInd, oldPP, nowPP, pathPrev);

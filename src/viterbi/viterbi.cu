@@ -1,5 +1,4 @@
 #include "cuda_runtime.h"
-// #include "gputimer.h"
 #include "gpuerrors.h"
 #include "viterbi.h"
 #include "viterbiBM.cuh"
@@ -8,36 +7,36 @@
 #include "viterbiConsts.h"
 #include <stdio.h>
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-struct ViterbiCUDA<inputType, metricType, outputType, compMode>::Impl {
+template<int options>
+struct ViterbiCUDA<options, true>::Impl {
 	cudaEvent_t start; 
 	cudaEvent_t stop;
 };
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-ViterbiCUDA<inputType, metricType, outputType, compMode>::ViterbiCUDA()
+template<int options>
+ViterbiCUDA<options, true>::ViterbiCUDA()
 : pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(16*400) 
 {
 	deviceSetup();
 	pImpl = new Impl();
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-ViterbiCUDA<inputType, metricType, outputType, compMode>::ViterbiCUDA(size_t inputNum)
+template<int options>
+ViterbiCUDA<options, true>::ViterbiCUDA(size_t inputNum)
 : pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(true)
 {
 	deviceSetup();
 	memAlloc(inputNum);
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-ViterbiCUDA<inputType, metricType, outputType, compMode>::~ViterbiCUDA(){
+template<int options>
+ViterbiCUDA<options, true>::~ViterbiCUDA(){
 	memFree();
 	delete pImpl;
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::memAlloc(size_t inputNum){
+template<int options>
+void ViterbiCUDA<options, true>::memAlloc(size_t inputNum){
 	size_t inputSize = getInputSize(inputNum);
 	size_t outputSize = getOutputSize(inputNum);
 	size_t ppSize = getPathPrevSize();
@@ -48,15 +47,15 @@ void ViterbiCUDA<inputType, metricType, outputType, compMode>::memAlloc(size_t i
 	HANDLE_ERROR(cudaMalloc((void**)&pathPrev_d, ppSize));
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::memFree(){
+template<int options>
+void ViterbiCUDA<options, true>::memFree(){
 	if(dec_d) 		{cudaFree(dec_d); dec_d = nullptr;}
 	if(enc_d) 		{cudaFree(enc_d); enc_d = nullptr;}
 	if(pathPrev_d)	{cudaFree(pathPrev_d); pathPrev_d = nullptr;}
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-size_t ViterbiCUDA<inputType, metricType, outputType, compMode>::getInputSize(size_t inputNum)
+template<int options>
+size_t ViterbiCUDA<options, true>::getInputSize(size_t inputNum)
 {
 	if constexpr (inputType == ChannelIn::HARD) {
 		return (roundup(inputNum, 8ULL) / 8);
@@ -78,54 +77,54 @@ size_t ViterbiCUDA<inputType, metricType, outputType, compMode>::getInputSize(si
 	}
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-size_t ViterbiCUDA<inputType, metricType, outputType, compMode>::getMessageLen(size_t inputNum)
+template<int options>
+size_t ViterbiCUDA<options, true>::getMessageLen(size_t inputNum)
 {return ((inputNum / 2 - (extraL + extraR)) / bitsPerPack * bitsPerPack);}
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-size_t ViterbiCUDA<inputType, metricType, outputType, compMode>::getOutputSize(size_t inputNum)
+template<int options>
+size_t ViterbiCUDA<options, true>::getOutputSize(size_t inputNum)
 {return (getMessageLen(inputNum)/8);}
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-size_t ViterbiCUDA<inputType, metricType, outputType, compMode>::getSharedMemSize()
+template<int options>
+size_t ViterbiCUDA<options, true>::getSharedMemSize()
 {return (bmMemWidth * 4 * sizeof(metric_t) * blockDimY);}
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-size_t ViterbiCUDA<inputType, metricType, outputType, compMode>::getPathPrevSize()
+template<int options>
+size_t ViterbiCUDA<options, true>::getPathPrevSize()
 {return (forwardLen / 8 * (1<<(constLen-1)) * blocksNum_total);}
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::timerSetup(){
+template<int options>
+void ViterbiCUDA<options, true>::timerSetup(){
 	cudaEventCreate(&(pImpl->start));
 	cudaEventCreate(&(pImpl->stop));
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::timerStart(){
+template<int options>
+void ViterbiCUDA<options, true>::timerStart(){
 	cudaEventRecord(pImpl->start, 0);
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::timerStop(){
+template<int options>
+void ViterbiCUDA<options, true>::timerStop(){
 	cudaEventRecord(pImpl->stop, 0);
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-float ViterbiCUDA<inputType, metricType, outputType, compMode>::timerElapsed(){
+template<int options>
+float ViterbiCUDA<options, true>::timerElapsed(){
 	float elapsed;
 	cudaEventSynchronize(pImpl->stop);
 	cudaEventElapsedTime(&elapsed, pImpl->start, pImpl->stop);
 	return elapsed;
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::timerDelete(){
+template<int options>
+void ViterbiCUDA<options, true>::timerDelete(){
 	cudaEventDestroy(pImpl->start);
 	cudaEventDestroy(pImpl->stop);
 }
 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::deviceSetup(){
+template<int options>
+void ViterbiCUDA<options, true>::deviceSetup(){
 	cudaSetDevice(0);
 	// cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 100ULL * 1024 * 1024);
 	// cudaDeviceProp deviceProp;
@@ -136,7 +135,7 @@ void ViterbiCUDA<inputType, metricType, outputType, compMode>::deviceSetup(){
 //-----------------------------------------------------------------------------
 //the main core of viterbi decoder
 //get data and polynoials ans decode 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode = CompMode::REG>
+template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
 __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* coded, size_t messageLen, decPack_t<outputType>* pathPrev_all) {
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
@@ -202,8 +201,8 @@ __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* 
 }
 
 //-----------------------------------------------------------------------------
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-void ViterbiCUDA<inputType, metricType, outputType, compMode>::run(encPack_t* input_h, decPack_t* output_h, size_t inputNum, float* kernelTime){
+template<int options>
+void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, size_t inputNum, float* kernelTime){
 	size_t inputSize = getInputSize(inputNum);
 	size_t messageLen = getMessageLen(inputNum);
 	size_t outputSize = getOutputSize(inputNum);
@@ -232,20 +231,44 @@ void ViterbiCUDA<inputType, metricType, outputType, compMode>::run(encPack_t* in
 	if(!preAllocated) memFree();
 }
 
-template class ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::SOFT4, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::SOFT8, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-//--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT16, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::FP32, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>;
+#define INSTANTIATE_CASE(optionsFinal) template class ViterbiCUDA<optionsFinal>;
 
-template class ViterbiCUDA<ChannelIn::HARD, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::SOFT4, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::SOFT8, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::SOFT16, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::FP32, Metric::M_B32, DecodeOut::O_B32, CompMode::REG>;
+#define INSTANTIATE_COMP(optionsPrior) \
+INSTANTIATE_CASE(optionsPrior | CompMode::REG) \
+INSTANTIATE_CASE(optionsPrior | CompMode::DPX)
 
-template class ViterbiCUDA<ChannelIn::HARD, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::SOFT4, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-//--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT8, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-//--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT16, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
-template class ViterbiCUDA<ChannelIn::FP32, Metric::M_FP16, DecodeOut::O_B16, CompMode::REG>;
+#define INSTANTIATE_DECODE(optionsPrior) \
+INSTANTIATE_COMP(optionsPrior | DecodeOut::O_B16) \
+INSTANTIATE_COMP(optionsPrior | DecodeOut::O_B32)
+
+#define INSTANTIATE_METRIC(optionsPrior) \
+INSTANTIATE_DECODE(optionsPrior | Metric::M_B16) \
+INSTANTIATE_DECODE(optionsPrior | Metric::M_B32) \
+INSTANTIATE_DECODE(optionsPrior | Metric::M_FP16)
+
+#define INSTANTIATE_ALL \
+INSTANTIATE_METRIC(ChannelIn::HARD) \
+INSTANTIATE_METRIC(ChannelIn::SOFT4) 
+INSTANTIATE_METRIC(ChannelIn::SOFT8) \
+INSTANTIATE_METRIC(ChannelIn::SOFT16) \
+INSTANTIATE_METRIC(ChannelIn::FP32)
+
+INSTANTIATE_ALL
+
+// template class ViterbiCUDA<ChannelIn::HARD | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::SOFT4 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
+// //--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT16 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::FP32 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
+
+// template class ViterbiCUDA<ChannelIn::HARD | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::SOFT4 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::SOFT16 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::FP32 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
+
+// template class ViterbiCUDA<ChannelIn::HARD | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::SOFT4 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
+// //--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
+// //--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT16 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
+// template class ViterbiCUDA<ChannelIn::FP32 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;

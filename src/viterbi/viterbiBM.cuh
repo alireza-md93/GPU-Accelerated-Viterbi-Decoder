@@ -194,13 +194,13 @@ __device__ void bmIndCalc(unsigned int& allBmInd0, unsigned int& allBmInd1){
 		inState0 &= (1<<CL)-1;
 		unsigned int inState1 = inState0 ^ (1<<(CL-1-ind));
 
-		bool out0 = __popc(inState0 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn1) % 2;
-		bool out1 = __popc(inState0 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn2) % 2;
+		bool out0 = __popc(inState0 & ViterbiCUDA<>::polyn1) % 2;
+		bool out1 = __popc(inState0 & ViterbiCUDA<>::polyn2) % 2;
 		int bmInd = (out0 << 1) | out1;
 		allBmInd0 = (allBmInd0 << 2) | bmInd;
 
-		out0 = __popc(inState1 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn1) % 2;
-		out1 = __popc(inState1 & ViterbiCUDA<ChannelIn::HARD, Metric::M_B16, DecodeOut::O_B16, CompMode::REG>::polyn2) % 2;
+		out0 = __popc(inState1 & ViterbiCUDA<>::polyn1) % 2;
+		out1 = __popc(inState1 & ViterbiCUDA<>::polyn2) % 2;
 		bmInd = (out0 << 1) | out1;
 		allBmInd1 = (allBmInd1 << 2) | bmInd;
 	}
