@@ -43,7 +43,7 @@ For all packed formats, the Most Significant Bit (MSB) corresponds to the input 
 
 ### Compilation
 
-The project can be compiled using `nvcc`, the NVIDIA CUDA Compiler. A Makefile is avialble to facilitate the compilation. Open a terminal and run `make` from the root directory of the project. Modify compiler flags as needed.
+The project can be compiled using `nvcc`, the NVIDIA CUDA Compiler. A Makefile is available to facilitate the compilation. Open a terminal and run `make` from the root directory of the project. Modify compiler flags as needed.
 
 ### Execution
 
@@ -67,19 +67,30 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   Signal-to-Noise Ratio (SNR) in dB.  
   *Default:* `15.0`
 
-- **`-m, --metric <type>`**  
-  Metric type used in the decoder core. Accepted values:  
-  - `b16` → 16-bit core  
-  - `b32` → 32-bit core (Default)
-  - `f16` → FP16 core 
-
-- **`-i, --input <type>`**  
+  - **`-i, --input <type>`**  
   Channel input type. Accepted values:  
   - `HARD` or `h` (Default)
   - `SOFT4` or `s4`  
   - `SOFT8` or `s8`  
   - `SOFT16` or `s16`  
   - `FP32` or `f`
+
+- **`-m, --metric <type>`**  
+  Metric type used in the decoder core. Accepted values:  
+  - `b16` → 16-bit core  
+  - `b32` → 32-bit core (Default)
+  - `f16` → FP16 core 
+
+- **`-o, --output <type>`**  
+  Integer type used to store packed output bits. Accepted values:  
+  - `b16` → An array of 16-bit unsigned integers, each containing 16 output bits (latest bit in LSB). 
+  - `b32` → An array of 32-bit unsigned integers, each containing 32 output bits (latest bit in LSB). (Default)
+
+- **`-c, --compMode <type>`**  
+  Computation mode for the decoder core. Accepted values:  
+  - `dpx` → Enables DPX intrinsics (requires Compute Capability 9.0+). Only available with integer metrics (`b16`, `b32`).
+  - `reg` → Regular computation core. (Default)
+
 
 - **`-v, --verbose`** 
   Show more details.
@@ -91,15 +102,10 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 
   The core decoder is encapsulated within the `ViterbiCUDA` class located in the `viterbi` directory. To use the decoder, you must instantiate this class with specific template parameters that define the processing core and input data type.
   
-  Before compilation, ensure that the desired template instantiations are enabled at the end of `viterbi/viterbi.cu`.
+  In order to avoid compiling all combinations of template parameters, modify the `OptionsValid` struct in `viterbi/viterbi.h`. This struct receives the same template parameter as `ViterbiCUDA`, and its boolean member `value` should be true for desired options. It is already set false for invalid cases.
 
   ### Template Parameters
-  The `ViterbiCUDA` class is templated as `ViterbiCUDA<Metric, ChannelIn>`.
-  
-  - **`Metric`**: Defines the data type for branch and path metrics (`metric_t`) and the packed decoded output (`decPack_t`).
-    - **`Metric::M_B16`**: Uses `int16_t` for `metric_t` and `uint16_t` for `decPack_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
-    - **`Metric::M_B32`**: Uses `int32_t` for `metric_t` and `uint32_t` for `decPack_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
-    - **`Metric::M_FP16`**: Uses `__half` for `metric_t` and `uint16_t` for `decPack_t`. This uses FP16/Tensor cores for metric calculations.
+  The `ViterbiCUDA` class is templated as `ViterbiCUDA<int options>`. A specific configuration can be passed as a bitwise OR of parameters defined as enumerations. The following are the parameters to be configured:
   
   - **`ChannelIn`**: Defines the input data type from the channel (`encPack_t`). For soft-decision types, negative values are treated as a '0' bit and positive values as a '1' bit.
     - **`ChannelIn::HARD`**: `int32_t` containing 32 packed 1-bit hard-decision values.
@@ -108,7 +114,28 @@ The compiled executable runs a simulation pipeline that generates random bits, e
     - **`ChannelIn::SOFT16`**: `int32_t` containing 2 packed 16-bit soft-decision values.
     - **`ChannelIn::FP32`**: `float` representing a single soft-decision value.
 
-  Please make sure that `Metric::M_B16` and `ChannelIn::SOFT16` are not used together since the metric type must be wider that the input type to avoid overflow.
+  - **`Metric`**: Defines the data type for branch and path metrics (`metric_t`).
+    - **`Metric::M_B16`**: Uses `int16_t` for `metric_t`. This enables `int16x2` SIMD-based DPX intrinsics for GPUs with Compute Capability 9.0+.
+    - **`Metric::M_B32`**: Uses `int32_t` for `metric_t`. This uses standard 32-bit DPX intrinsics for broader GPU compatibility.
+    - **`Metric::M_FP16`**: Uses `__half` for `metric_t` and `uint16_t` for `decPack_t`. This uses FP16/Tensor cores for metric calculations.
+
+  - **`DecodeOut`**: Defines the data type for the packed decoded output (`decPack_t`).
+    - **`DecodeOut::O_B16`**: Uses `uint16_t` for `decPack_t`.
+    - **`DecodeOut::O_B32`**: Uses `uint32_t` for `decPack_t`.
+
+  - **`CompMode`**: Defines the computation mode.
+    - **`CompMode::DPX`**: This enables `int16x2` SIMD-based DPX intrinsics for 16-bit metrics and `int32` DPX intrinsics for 32-bit metrics on GPUs with Compute Capability 9.0+.
+    - **`CompMode::REG`**: Uses regular computation mode.
+  
+
+  Invalid configurations:
+  - `Metric::M_B16` `| ChannelIn::SOFT16` 
+  - `Metric::M_FP16` `| ChannelIn::SOFT16`
+  - `Metric::M_FP16` `| ChannelIn::SOFT8`
+  - `Metric::M_FP16` `| CompMode::DPX`
+
+
+
   
   ### Class Interface
   
@@ -149,15 +176,16 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   #include "viterbi.h"
   
   // Instantiate a decoder for 8-bit soft-decision inputs and a 32-bit metric core
-  ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8> decoder;
+  using ViterbiType = ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_B32 | DecodeOut::O_B32>;
+  ViterbiType decoder;
   
   size_t num_encoded_bits = 1000000;
   size_t input_size_bytes = decoder.getInputSize(num_encoded_bits);
   size_t output_size_bytes = decoder.getOutputSize(num_encoded_bits);
   
   // Allocate host memory
-  auto host_input = new ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::encPack_t[input_size_bytes / sizeof(ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::encPack_t)];
-  auto host_output = new ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::decPack_t[output_size_bytes / sizeof(ViterbiCUDA<Metric::M_B32, ChannelIn::SOFT8>::decPack_t)];
+  auto host_input = new ViterbiType::encPack_t[input_size_bytes / sizeof(ViterbiType::encPack_t)];
+  auto host_output = new ViterbiType::decPack_t[output_size_bytes / sizeof(ViterbiType::decPack_t)];
   
   // ... fill host_input with data ...
   
