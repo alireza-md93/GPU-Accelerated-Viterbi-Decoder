@@ -134,11 +134,6 @@ class ViterbiCUDA<options, true> : public ViterbiCUDA<options, false>{
 	size_t getOutputSize(size_t inputNum);
 
 private:
-	decPack_t* pathPrev_d;
-	decPack_t* dec_d;
-	encPack_t* enc_d;
-	bool preAllocated;
-	int blocksNum_total;
 	struct Impl;
 	Impl* pImpl;
 

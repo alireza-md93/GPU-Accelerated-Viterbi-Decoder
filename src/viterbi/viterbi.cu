@@ -9,21 +9,27 @@
 
 template<int options>
 struct ViterbiCUDA<options, true>::Impl {
+	decPack_t* pathPrev_d;
+	decPack_t* dec_d;
+	encPack_t* enc_d;
+	bool preAllocated;
+	int blocksNum_total;
 	cudaEvent_t start; 
 	cudaEvent_t stop;
+	Impl() : pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(16*400) {}
+	~Impl() {}
 };
 
 template<int options>
 ViterbiCUDA<options, true>::ViterbiCUDA()
-: pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(false), blocksNum_total(16*400) 
+: pImpl(new Impl())
 {
 	deviceSetup();
-	pImpl = new Impl();
 }
 
 template<int options>
 ViterbiCUDA<options, true>::ViterbiCUDA(size_t inputNum)
-: pathPrev_d(nullptr), dec_d(nullptr), enc_d(nullptr), preAllocated(true)
+: pImpl(new Impl())
 {
 	deviceSetup();
 	memAlloc(inputNum);
@@ -42,16 +48,16 @@ void ViterbiCUDA<options, true>::memAlloc(size_t inputNum){
 	size_t ppSize = getPathPrevSize();
 	
 	//initialization
-	HANDLE_ERROR(cudaMalloc((void**)&enc_d, inputSize));
-	HANDLE_ERROR(cudaMalloc((void**)&dec_d, outputSize));
-	HANDLE_ERROR(cudaMalloc((void**)&pathPrev_d, ppSize));
+	HANDLE_ERROR(cudaMalloc((void**)&(pImpl->enc_d), inputSize));
+	HANDLE_ERROR(cudaMalloc((void**)&(pImpl->dec_d), outputSize));
+	HANDLE_ERROR(cudaMalloc((void**)&(pImpl->pathPrev_d), ppSize));
 }
 
 template<int options>
 void ViterbiCUDA<options, true>::memFree(){
-	if(dec_d) 		{cudaFree(dec_d); dec_d = nullptr;}
-	if(enc_d) 		{cudaFree(enc_d); enc_d = nullptr;}
-	if(pathPrev_d)	{cudaFree(pathPrev_d); pathPrev_d = nullptr;}
+	if(pImpl->dec_d) 		{cudaFree(pImpl->dec_d); pImpl->dec_d = nullptr;}
+	if(pImpl->enc_d) 		{cudaFree(pImpl->enc_d); pImpl->enc_d = nullptr;}
+	if(pImpl->pathPrev_d)	{cudaFree(pImpl->pathPrev_d); pImpl->pathPrev_d = nullptr;}
 }
 
 template<int options>
@@ -91,7 +97,7 @@ size_t ViterbiCUDA<options, true>::getSharedMemSize()
 
 template<int options>
 size_t ViterbiCUDA<options, true>::getPathPrevSize()
-{return (forwardLen / 8 * (1<<(constLen-1)) * blocksNum_total);}
+{return (forwardLen / 8 * (1<<(constLen-1)) * pImpl->blocksNum_total);}
 
 template<int options>
 void ViterbiCUDA<options, true>::timerSetup(){
@@ -208,27 +214,27 @@ void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, si
 	size_t outputSize = getOutputSize(inputNum);
 	size_t sharedMemSize = getSharedMemSize();
 
-	if(!preAllocated) memAlloc(inputNum);
+	if(!(pImpl->preAllocated)) memAlloc(inputNum);
 
-	HANDLE_ERROR(cudaMemcpy(enc_d, input_h, inputSize, cudaMemcpyHostToDevice));
+	HANDLE_ERROR(cudaMemcpy(pImpl->enc_d, input_h, inputSize, cudaMemcpyHostToDevice));
 	
-	dim3 grid (blocksNum_total/blockDimY, 1, 1); 
+	dim3 grid (pImpl->blocksNum_total/blockDimY, 1, 1); 
 	dim3 block (32, blockDimY, 1);
 
 	if(kernelTime){
 		timerSetup();
 		timerStart();
 	}
-	viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (dec_d, enc_d, messageLen, pathPrev_d);
+	viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
 	if(kernelTime){
 		timerStop();
 		*kernelTime = timerElapsed();
 	}
 	HANDLE_ERROR(   cudaPeekAtLastError()   );
 
-	HANDLE_ERROR(cudaMemcpy(output_h, dec_d, outputSize, cudaMemcpyDeviceToHost));
+	HANDLE_ERROR(cudaMemcpy(output_h, pImpl->dec_d, outputSize, cudaMemcpyDeviceToHost));
 
-	if(!preAllocated) memFree();
+	if(!(pImpl->preAllocated)) memFree();
 }
 
 #define INSTANTIATE_CASE(optionsFinal) template class ViterbiCUDA<optionsFinal>;
