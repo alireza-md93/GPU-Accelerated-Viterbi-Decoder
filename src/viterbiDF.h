@@ -177,9 +177,9 @@ public:
         std::vector<encPack_t> soft = std::any_cast<std::vector<encPack_t>>(*in); 
         decVec_t out; 
         size_t decInputNum = soft.size() * encDataPerPack;
-        out.resize(viterbi->getOutputSize(soft.size())/sizeof(decPack_t));
+        out.resize(viterbi->getOutputSize(decInputNum)/sizeof(decPack_t));
 		float gpuKernelTime;
-		viterbi->run(soft.data(), out.data(), soft.size(), &gpuKernelTime);
+		viterbi->run(soft.data(), out.data(), decInputNum, &gpuKernelTime);
         setStatus("GPU kernel time", gpuKernelTime);
         return out;
     }
