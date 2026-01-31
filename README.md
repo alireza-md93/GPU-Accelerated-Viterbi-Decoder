@@ -52,7 +52,7 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 ./main
 
 # Run with a custom parameters
-./main -n 1000000 -s 5.5 -m 32 -i s4
+./main -n 1000000 -s 5.5 -m b32 -i s4
 ```
 
 **Command-Line Options:**
@@ -67,8 +67,8 @@ The compiled executable runs a simulation pipeline that generates random bits, e
 
 - **`-m, --metric <type>`**  
   Metric type used in the decoder core. Accepted values:  
-  - `16` or `16bit` → 16-bit core  
-  - `32` or `32bit` → 32-bit core (Default)
+  - `b16` or `16bit` → 16-bit core  
+  - `b32` or `32bit` → 32-bit core (Default)
 
 - **`-i, --input <type>`**  
   Channel input type. Accepted values:  

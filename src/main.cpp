@@ -160,7 +160,7 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
                       << "Options:\n"
                       << "  -n, --num <integer>      Set the message length.\n"
                       << "  -s, --snr <float>        Set the Signal-to-Noise Ratio (SNR).\n"
-                      << "  -m, --metric <type>      Set the metric type (16bit|16 or 32bit|32).\n"
+                      << "  -m, --metric <type>      Set the metric type (16bit|b16 or 32bit|b32).\n"
                       << "  -i, --input <type>       Set the input channel type (HARD|h, SOFT4|s4, SOFT8|s8, SOFT16|s16, FP32|f).\n"
                       << "  -v, --verbose            Enable verbose output.\n"
                       << "  -h, --help               Display this help message.\n";
@@ -181,9 +181,9 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, Metric& metri
             }
         } else if ((arg == "-m" || arg == "--metric") && i + 1 < argc) {
             std::string metricStr = argv[++i];
-            if (metricStr == "16bit" || metricStr == "16") {
+            if (metricStr == "16bit" || metricStr == "b16") {
                 metricType = Metric::B16;
-            } else if (metricStr == "32bit" || metricStr == "32") {
+            } else if (metricStr == "32bit" || metricStr == "b32") {
                 metricType = Metric::B32;
             } else {
                 std::cerr << "Error: Invalid metric type for " << arg << "." << std::endl;
