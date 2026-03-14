@@ -215,6 +215,7 @@ void ViterbiCUDA<metricType, inputType>::run(encPack_t* input_h, decPack_t* outp
 	if(kernelTime){
 		timerStop();
 		*kernelTime = timerElapsed();
+		timerDelete();
 	}
 	HANDLE_ERROR(   cudaPeekAtLastError()   );
 
