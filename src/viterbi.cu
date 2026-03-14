@@ -496,6 +496,7 @@ void ViterbiCUDA<metricType>::run(float* input_h, decPack_t* output_h, size_t in
 	if(kernelTime){
 		timerStop();
 		*kernelTime = timerElapsed();
+		timerDelete();
 	}
 	HANDLE_ERROR(   cudaPeekAtLastError()   );
 
