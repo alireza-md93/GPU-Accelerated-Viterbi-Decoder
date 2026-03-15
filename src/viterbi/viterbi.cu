@@ -6,6 +6,8 @@
 #include "viterbiTB.cuh"
 #include "viterbiConsts.h"
 #include <stdio.h>
+#include <vector>
+#include <algorithm>
 
 template<int options>
 struct ViterbiCUDA<options, true>::Impl {
@@ -209,6 +211,9 @@ __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* 
 //-----------------------------------------------------------------------------
 template<int options>
 void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, size_t inputNum, float* kernelTime){
+	const float WARMUP = 500;
+	const float ERROR = 0.05;
+	const int MAX_TIMES = 100;
 	size_t inputSize = getInputSize(inputNum);
 	size_t messageLen = getMessageLen(inputNum);
 	size_t outputSize = getOutputSize(inputNum);
@@ -221,15 +226,49 @@ void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, si
 	dim3 grid (pImpl->blocksNum_total/blockDimY, 1, 1); 
 	dim3 block (32, blockDimY, 1);
 
-	if(kernelTime){
-		timerSetup();
-		timerStart();
+	std::vector<float> kernelTimeVec;
+	
+	if(kernelTime == nullptr){
+		viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
 	}
-	viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
-	if(kernelTime){
-		timerStop();
-		*kernelTime = timerElapsed();
+	else{
+		float warmupTime = 0.0;
+		while(warmupTime < WARMUP && kernelTimeVec.size() < MAX_TIMES){
+			timerSetup();
+			timerStart();
+
+			viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
+
+			timerStop();
+			*kernelTime = timerElapsed();
+			timerDelete();
+
+			warmupTime += *kernelTime;
+			kernelTimeVec.push_back(*kernelTime);
+			// std::cout << *kernelTime << "," << warmupTime << std::endl;
+		}
+		std::sort(kernelTimeVec.begin(), kernelTimeVec.end());
+
+		while((kernelTimeVec.back() - kernelTimeVec.front()) / kernelTimeVec.back() > ERROR){
+			timerSetup();
+			timerStart();
+
+			viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
+
+			timerStop();
+			*kernelTime = timerElapsed();
+			timerDelete();
+
+			auto it = std::lower_bound(kernelTimeVec.begin(), kernelTimeVec.end(), *kernelTime);
+			kernelTimeVec.insert(it, *kernelTime);
+			kernelTimeVec.pop_back();
+
+			// std::cout << *kernelTime << std::endl;
+			// for(auto t : kernelTimeVec) std::cout << t << ","; std::cout << std::endl;
+			// std::cout << std::endl;
+		}
 	}
+
 	HANDLE_ERROR(   cudaPeekAtLastError()   );
 
 	HANDLE_ERROR(cudaMemcpy(output_h, pImpl->dec_d, outputSize, cudaMemcpyDeviceToHost));
