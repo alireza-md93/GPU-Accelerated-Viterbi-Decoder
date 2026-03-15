@@ -6,6 +6,7 @@
 #include "viterbiACS.cuh"
 #include "viterbiTB.cuh"
 #include "viterbiConsts.h"
+#include <nvtx3/nvToolsExt.h>
 #include <stdio.h>
 #include <vector>
 #include <algorithm>
@@ -254,6 +255,10 @@ void ViterbiCUDA<metricType, inputType>::run(encPack_t* input_h, decPack_t* outp
 			// std::cout << std::endl;
 		}
 	}
+
+	// nvtxRangePush("kernel");
+	// viterbi_core<metricType, inputType> <<<grid, block, sharedMemSize>>> (dec_d, enc_d, messageLen, pathPrev_d);
+	// nvtxRangePop();
 
 	HANDLE_ERROR(   cudaPeekAtLastError()   );
 
