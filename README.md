@@ -126,6 +126,10 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   - **`CompMode`**: Defines the computation mode.
     - **`CompMode::DPX`**: This enables `int16x2` SIMD-based DPX intrinsics for 16-bit metrics and `int32` DPX intrinsics for 32-bit metrics on GPUs with Compute Capability 9.0+.
     - **`CompMode::REG`**: Uses regular computation mode.
+
+  - **`StateExchng`**: Determines whether to use the register-based state-exchange algorithm.
+    - **`StateExchng::SE_EN`**: Enables the state-exchange algorithm, utilizing high-speed on-chip registers for path history to maximize performance.
+    - **`StateExchng::SE_DIS`**: Disables the state-exchange algorithm. Instead, path metrics and traceback pointers are managed using an allocated array in shared memory.
   
 
   Invalid configurations:
@@ -133,6 +137,7 @@ The compiled executable runs a simulation pipeline that generates random bits, e
   - `Metric::M_FP16` `| ChannelIn::SOFT16`
   - `Metric::M_FP16` `| ChannelIn::SOFT8`
   - `Metric::M_FP16` `| CompMode::DPX`
+  - `Metric::M_B16` `| CompMode::DPX` `| StateExchng::SE_DIS`
 
 
 

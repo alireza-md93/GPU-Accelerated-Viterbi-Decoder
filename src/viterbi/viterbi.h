@@ -8,16 +8,19 @@ constexpr int CHANNEL_SHIFT = 0;
 constexpr int METRIC_SHIFT = 4;
 constexpr int DECODE_SHIFT = 8;
 constexpr int COMP_SHIFT = 12;
+constexpr int SE_SHIFT = 16;
 
-constexpr int CHANNEL_MASK = (0xf << 0);
-constexpr int METRIC_MASK = (0xf << 4);
-constexpr int DECODE_MASK = (0xf << 8);
-constexpr int COMP_MASK =  (0xf <<12);
+constexpr int CHANNEL_MASK = (0xf << CHANNEL_SHIFT);
+constexpr int METRIC_MASK = (0xf << METRIC_SHIFT);
+constexpr int DECODE_MASK = (0xf << DECODE_SHIFT);
+constexpr int COMP_MASK =  (0xf << COMP_SHIFT);
+constexpr int SE_MASK =  (0xf << SE_SHIFT);
 
 enum ChannelIn {HARD=(0x0<<CHANNEL_SHIFT), SOFT4=(0x1<<CHANNEL_SHIFT), SOFT8=(0x2<<CHANNEL_SHIFT), SOFT16=(0x3<<CHANNEL_SHIFT), FP32=(0x4<<CHANNEL_SHIFT)};
 enum Metric {M_B32=(0x0<<METRIC_SHIFT), M_B16=(0x1<<METRIC_SHIFT), M_FP16=(0x2<<METRIC_SHIFT)};
 enum DecodeOut {O_B32=(0x0<<DECODE_SHIFT), O_B16=(0x1<<DECODE_SHIFT)};
-enum CompMode{REG=(0x0<<COMP_SHIFT), DPX=(0x1<<COMP_SHIFT)};
+enum CompMode {REG=(0x0<<COMP_SHIFT), DPX=(0x1<<COMP_SHIFT)};
+enum StateExchng {SE_EN=(0x0<<SE_SHIFT), SE_DIS=(0x1<<SE_SHIFT)};
 
 template<int options>
 struct OptionsValid{
@@ -32,6 +35,10 @@ struct OptionsValid{
 		 (options & METRIC_MASK) == Metric::M_B16) ||
 
 		((options & METRIC_MASK) == Metric::M_FP16 &&
+		 (options & COMP_MASK) == CompMode::DPX) ||
+
+		((options & SE_MASK) == StateExchng::SE_DIS &&
+		 (options & METRIC_MASK) == Metric::M_B16 &&
 		 (options & COMP_MASK) == CompMode::DPX) ? false : true;
 
 	// static constexpr bool value = 
@@ -51,6 +58,7 @@ struct ViterbiCUDA<options, false>{
 	static constexpr Metric metricType = static_cast<Metric>(options & METRIC_MASK);
 	static constexpr DecodeOut outputType = static_cast<DecodeOut>(options & DECODE_MASK);
 	static constexpr CompMode compMode = static_cast<CompMode>(options & COMP_MASK);
+	static constexpr StateExchng stateEx = static_cast<StateExchng>(options & SE_MASK);
 
 	using metric_t = 	std::conditional_t<metricType == Metric::M_B16, int16_t, 
 						std::conditional_t<metricType == Metric::M_B32, int32_t,
@@ -96,6 +104,7 @@ class ViterbiCUDA<options, true> : public ViterbiCUDA<options, false>{
 	using ViterbiCUDA<options, false>::metricType;
 	using ViterbiCUDA<options, false>::outputType;
 	using ViterbiCUDA<options, false>::compMode;
+	using ViterbiCUDA<options, false>::stateEx;
 
 	using typename ViterbiCUDA<options, false>::metric_t;
 	using typename ViterbiCUDA<options, false>::decPack_t;

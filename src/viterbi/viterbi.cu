@@ -95,7 +95,11 @@ size_t ViterbiCUDA<options, true>::getOutputSize(size_t inputNum)
 
 template<int options>
 size_t ViterbiCUDA<options, true>::getSharedMemSize()
-{return (bmMemWidth * 4 * sizeof(metric_t) * blockDimY);}
+{
+	size_t shmemSize = bmMemWidth * 4 * sizeof(metric_t) * blockDimY;
+	if constexpr (stateEx == StateExchng::SE_DIS) shmemSize += 64 * (sizeof(decPack_t) + sizeof(metric_t)) * blockDimY;
+	return shmemSize;
+}
 
 template<int options>
 size_t ViterbiCUDA<options, true>::getPathPrevSize()
@@ -143,15 +147,21 @@ void ViterbiCUDA<options, true>::deviceSetup(){
 //-----------------------------------------------------------------------------
 //the main core of viterbi decoder
 //get data and polynoials ans decode 
-template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode>
-__global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* coded, size_t messageLen, decPack_t<outputType>* pathPrev_all) {
+template<ChannelIn inputType, Metric metricType, DecodeOut outputType, CompMode compMode, StateExchng stateEx>
+__global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* coded, size_t messageLen, decPack_t<outputType>* pathPrev_all, size_t shmemSize_x) {
 	//coded: input coded array that contains 2*n bits with constraint mentioned above
 	//data: output array that contains n allocated bits with constraint mentioned above
 	
-	extern __shared__ int sharedMem[];
-	metric_t<metricType>* sharedMemTip = reinterpret_cast<metric_t<metricType>*>(sharedMem);
-	sharedMemTip += ty * (bmMemWidth * 4);
+	extern __shared__ char sharedMem[];
+	char* sharedMemTip = sharedMem;
+	sharedMemTip += ty * shmemSize_x;
+
 	metric_t<metricType> (*branchMetric)[4] = (metric_t<metricType>(*)[4])sharedMemTip;
+	sharedMemTip += bmMemWidth * 4 * sizeof(metric_t<metricType>);
+	metric_t<metricType>* PM = (metric_t<metricType>*)sharedMemTip;
+	sharedMemTip += 64 * sizeof(metric_t<metricType>);
+	decPack_t<outputType>* PP = (decPack_t<outputType>*)sharedMemTip;
+	sharedMemTip += 64 * sizeof(decPack_t<outputType>);
 
 	decPack_t<outputType> (*pathPrev) [1<<(CL-1)] = (decPack_t<outputType> (*) [1<<(CL-1)])pathPrev_all + (bx*bdy + ty) * ((forwardLen-1)/bpp<outputType>+1);
 	
@@ -167,12 +177,22 @@ __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* 
 	coded += startInd*2/dpp<inputType>;
 	
 	/****************************** calculate trellis parameters ******************************/	 
-	trellisPM<metricType> oldPM, nowPM;
-	trellisPP<outputType> oldPP, nowPP;
 	bmCalcHelper<inputType> bmHelper;
-	unsigned int allBmInd0, allBmInd1;
-	bmIndCalc(allBmInd0, allBmInd1);
-	int pmNormStride = 1 << (bpm<metricType> - chnWidth<inputType> - 2);
+	ForwardACS<metricType, outputType, compMode, stateEx> forwardACS;
+	forwardACS.pmNormStride = 1 << (bpm<metricType> - chnWidth<inputType> - 2);
+	forwardACS.branchMetric = branchMetric;
+	if constexpr (stateEx == StateExchng::SE_EN){
+		bmIndCalc(forwardACS.allBmInd0, forwardACS.allBmInd1);
+	}
+	else{
+		forwardACS.bmOffset = __popc((tx<<1) & ViterbiCUDA<>::polyn1) % 2;
+		forwardACS.bmOffset <<= 1;
+		forwardACS.bmOffset += __popc((tx<<1) & ViterbiCUDA<>::polyn2) % 2;
+		forwardACS.PM = PM;
+		forwardACS.PP = PP;
+		PM[tx] = 0;
+		PM[tx+32] = 0;
+	}
 	/******************************************************************************************/
 
 	int bmBatchLen = min(extraL + extraR, bmMemWidth);
@@ -180,7 +200,7 @@ __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* 
 		bmCalc<inputType, metricType>(bmBatch, bmBatchLen, branchMetric, coded, bmHelper);
 		__syncwarp();
 		for(int stage=bmBatch; stage<bmBatch+bmBatchLen; stage++)
-			forwardACS<metricType, outputType>(stage, oldPM, oldPP, nowPM, nowPP, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+			forwardACS.comp(stage, pathPrev);
 	}
 
 	int slide;
@@ -191,7 +211,7 @@ __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* 
 			bmCalc<inputType, metricType>(bmBatch, bmBatchLen, branchMetric, coded, bmHelper);   
 			__syncwarp();
 			for(int i=bmBatch; i<bmBatch+bmBatchLen; i++){	
-				forwardACS<metricType, outputType>(i, oldPM, oldPP, nowPM, nowPP, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+				forwardACS.comp(i, pathPrev);
 			}
 		}
 		__syncwarp();
@@ -203,7 +223,7 @@ __global__ void viterbi_core(decPack_t<outputType>* data, encPack_t<inputType>* 
 	bmCalc<inputType, metricType>(stage, remSlideSize, branchMetric, coded, bmHelper);   
 	__syncwarp();
 	for(int i=stage; i<stage+remSlideSize; i++){	
-		forwardACS<metricType, outputType>(i, oldPM, oldPP, nowPM, nowPP, pathPrev, branchMetric, allBmInd0, allBmInd1, pmNormStride);
+		forwardACS.comp(i, pathPrev);
 	}
 	traceback<outputType>(stage+remSlideSize-1, slide+remSlideSize-1, remSlideSize, data, pathPrev);
 }
@@ -229,7 +249,7 @@ void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, si
 	std::vector<float> kernelTimeVec;
 	
 	if(kernelTime == nullptr){
-		viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
+		viterbi_core<inputType, metricType, outputType, compMode, stateEx> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d, sharedMemSize/blockDimY);
 	}
 	else{
 		float warmupTime = 0.0;
@@ -237,7 +257,7 @@ void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, si
 			timerSetup();
 			timerStart();
 
-			viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
+			viterbi_core<inputType, metricType, outputType, compMode, stateEx> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d, sharedMemSize/blockDimY);
 
 			timerStop();
 			*kernelTime = timerElapsed();
@@ -253,7 +273,7 @@ void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, si
 			timerSetup();
 			timerStart();
 
-			viterbi_core<inputType, metricType, outputType, compMode> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d);
+			viterbi_core<inputType, metricType, outputType, compMode, stateEx> <<<grid, block, sharedMemSize>>> (pImpl->dec_d, pImpl->enc_d, messageLen, pImpl->pathPrev_d, sharedMemSize/blockDimY);
 
 			timerStop();
 			*kernelTime = timerElapsed();
@@ -278,42 +298,29 @@ void ViterbiCUDA<options, true>::run(encPack_t* input_h, decPack_t* output_h, si
 
 #define INSTANTIATE_CASE(optionsFinal) template class ViterbiCUDA<optionsFinal>;
 
-#define INSTANTIATE_COMP(optionsPrior) \
-INSTANTIATE_CASE(optionsPrior | CompMode::REG) \
-INSTANTIATE_CASE(optionsPrior | CompMode::DPX)
-
 #define INSTANTIATE_DECODE(optionsPrior) \
-INSTANTIATE_COMP(optionsPrior | DecodeOut::O_B16) \
-INSTANTIATE_COMP(optionsPrior | DecodeOut::O_B32)
+INSTANTIATE_CASE(optionsPrior | DecodeOut::O_B16) \
+INSTANTIATE_CASE(optionsPrior | DecodeOut::O_B32)
+
+#define INSTANTIATE_INPUT(optionsPrior) \
+INSTANTIATE_DECODE(optionsPrior | ChannelIn::HARD) \
+INSTANTIATE_DECODE(optionsPrior | ChannelIn::SOFT4) \
+INSTANTIATE_DECODE(optionsPrior | ChannelIn::SOFT8) \
+INSTANTIATE_DECODE(optionsPrior | ChannelIn::SOFT16) \
+INSTANTIATE_DECODE(optionsPrior | ChannelIn::FP32)
+
+#define INSTANTIATE_COMP(optionsPrior) \
+INSTANTIATE_INPUT(optionsPrior | CompMode::REG) \
+INSTANTIATE_INPUT(optionsPrior | CompMode::DPX)
+
 
 #define INSTANTIATE_METRIC(optionsPrior) \
-INSTANTIATE_DECODE(optionsPrior | Metric::M_B16) \
-INSTANTIATE_DECODE(optionsPrior | Metric::M_B32) \
-INSTANTIATE_DECODE(optionsPrior | Metric::M_FP16)
+INSTANTIATE_COMP(optionsPrior | Metric::M_B16) \
+INSTANTIATE_COMP(optionsPrior | Metric::M_B32) \
+INSTANTIATE_COMP(optionsPrior | Metric::M_FP16)
 
 #define INSTANTIATE_ALL \
-INSTANTIATE_METRIC(ChannelIn::HARD) \
-INSTANTIATE_METRIC(ChannelIn::SOFT4) 
-INSTANTIATE_METRIC(ChannelIn::SOFT8) \
-INSTANTIATE_METRIC(ChannelIn::SOFT16) \
-INSTANTIATE_METRIC(ChannelIn::FP32)
+INSTANTIATE_METRIC(StateExchng::SE_EN) \
+INSTANTIATE_METRIC(StateExchng::SE_DIS)
 
 INSTANTIATE_ALL
-
-// template class ViterbiCUDA<ChannelIn::HARD | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::SOFT4 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
-// //--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT16 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::FP32 | Metric::M_B16 | DecodeOut::O_B16 | CompMode::REG>;
-
-// template class ViterbiCUDA<ChannelIn::HARD | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::SOFT4 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::SOFT16 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::FP32 | Metric::M_B32 | DecodeOut::O_B32 | CompMode::REG>;
-
-// template class ViterbiCUDA<ChannelIn::HARD | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::SOFT4 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
-// //--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT8 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
-// //--- never to be enabled ---// template class ViterbiCUDA<ChannelIn::SOFT16 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;
-// template class ViterbiCUDA<ChannelIn::FP32 | Metric::M_FP16 | DecodeOut::O_B16 | CompMode::REG>;

@@ -22,6 +22,7 @@ int main(int argc, char *argv[]) {
     Metric metricType = static_cast<Metric>(options & METRIC_MASK);
     DecodeOut outputType = static_cast<DecodeOut>(options & DECODE_MASK);
     CompMode compMode = static_cast<CompMode>(options & COMP_MASK);
+    StateExchng stateEx = static_cast<StateExchng>(options & SE_MASK);
 
     if(metricType == Metric::M_B16 && inputType == ChannelIn::SOFT16){
         std::cerr << "Error: 16-bit metric does not support 16-bit soft decision input." << std::endl;
@@ -67,11 +68,12 @@ int main(int argc, char *argv[]) {
         std::cout << "Metric Type: " << ((metricType == Metric::M_B16) ? "16-bit" : ((metricType == Metric::M_B32) ? "32-bit" : "FP16")) << std::endl;
         std::cout << "Output Type: " << ((outputType == DecodeOut::O_B16) ? "16-bit" : "32-bit") << std::endl;
         std::cout << "Computation Mode: " << ((compMode == CompMode::REG) ? "Regular" : "DPX") << std::endl;
+        std::cout << "State Exchange Mode: " << ((stateEx == StateExchng::SE_DIS) ? "Disabled" : "Enabled") << std::endl;
         std::cout << std::endl;
     }
 
     // --- Dataflow Pipeline Execution Section ---
-    int BENs; //bit error number
+    int BENs = -messageLen; //bit error number
     double BERs; //bit error rate
 
     // Nested macros to run the pipeline with the correct template parameters
@@ -81,25 +83,29 @@ int main(int argc, char *argv[]) {
         if(options == (optionsFinal)) runPipeline<optionsFinal>(messageLen, snr, BENs, verbose); \
     }
 
-    #define RUN_PIPELINE_COMP(optionsPrior) \
-    RUN_PIPELINE_CASE(optionsPrior | CompMode::REG) \
-    RUN_PIPELINE_CASE(optionsPrior | CompMode::DPX)
-
     #define RUN_PIPELINE_DECODE(optionsPrior) \
-    RUN_PIPELINE_COMP(optionsPrior | DecodeOut::O_B16) \
-    RUN_PIPELINE_COMP(optionsPrior | DecodeOut::O_B32)
+    RUN_PIPELINE_CASE(optionsPrior | DecodeOut::O_B16) \
+    RUN_PIPELINE_CASE(optionsPrior | DecodeOut::O_B32)
+
+    #define RUN_PIPELINE_INPUT(optionsPrior) \
+    RUN_PIPELINE_DECODE(optionsPrior | ChannelIn::HARD) \
+    RUN_PIPELINE_DECODE(optionsPrior | ChannelIn::SOFT4) \
+    RUN_PIPELINE_DECODE(optionsPrior | ChannelIn::SOFT8) \
+    RUN_PIPELINE_DECODE(optionsPrior | ChannelIn::SOFT16) \
+    RUN_PIPELINE_DECODE(optionsPrior | ChannelIn::FP32)
+    
+    #define RUN_PIPELINE_COMP(optionsPrior) \
+    RUN_PIPELINE_INPUT(optionsPrior | CompMode::REG) \
+    RUN_PIPELINE_INPUT(optionsPrior | CompMode::DPX)
 
     #define RUN_PIPELINE_METRIC(optionsPrior) \
-    RUN_PIPELINE_DECODE(optionsPrior | Metric::M_B16) \
-    RUN_PIPELINE_DECODE(optionsPrior | Metric::M_B32) \
-    RUN_PIPELINE_DECODE(optionsPrior | Metric::M_FP16)
+    RUN_PIPELINE_COMP(optionsPrior | Metric::M_B16) \
+    RUN_PIPELINE_COMP(optionsPrior | Metric::M_B32) \
+    RUN_PIPELINE_COMP(optionsPrior | Metric::M_FP16)
 
     #define RUN_PIPELINE_ALL \
-    RUN_PIPELINE_METRIC(ChannelIn::HARD) \
-    RUN_PIPELINE_METRIC(ChannelIn::SOFT4) \
-    RUN_PIPELINE_METRIC(ChannelIn::SOFT8) \
-    RUN_PIPELINE_METRIC(ChannelIn::SOFT16) \
-    RUN_PIPELINE_METRIC(ChannelIn::FP32)
+    RUN_PIPELINE_METRIC(StateExchng::SE_EN) \
+    RUN_PIPELINE_METRIC(StateExchng::SE_DIS)
 
     RUN_PIPELINE_ALL
     //-----------------------------------------------------------------------------
@@ -254,7 +260,17 @@ void parseArg(int argc, char *argv[], int& messageLen, float& snr, int& options,
                 std::cerr << "Error: Invalid computation mode for " << arg << "." << std::endl;
                 exit(1);
             }
-        } else if (arg == "-v" || arg == "--verbose") {
+        } else if ((arg == "-se" || arg == "--stateEx") && i + 1 < argc) {
+            std::string stateExStr = argv[++i];
+            if (stateExStr == "EN" || stateExStr == "en") {
+                options |= static_cast<int>(StateExchng::SE_EN);
+            } else if (stateExStr == "DIS" || stateExStr == "dis") {
+                options |= static_cast<int>(StateExchng::SE_DIS);
+            } else {
+                std::cerr << "Error: Invalid state extension mode for " << arg << "." << std::endl;
+                exit(1);
+            }
+        }else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
         } else {
             std::cerr << "Error: Unknown or incomplete argument: " << arg << std::endl;
